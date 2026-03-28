@@ -1,0 +1,60 @@
+version: "3.8"
+
+services:
+  # === FastAPI 主應用（開發模式）===
+  app:
+    build: .
+    container_name: medqueue-app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env.dev
+    depends_on:
+      - redis
+    volumes:
+      - .:/app        # 掛載原始碼，改 code 自動 reload
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  # === Celery Worker ===
+  worker:
+    build: .
+    container_name: medqueue-worker
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
+    env_file:
+      - .env.dev
+    depends_on:
+      - redis
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  # === Celery Beat ===
+  beat:
+    build: .
+    container_name: medqueue-beat
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+    env_file:
+      - .env.dev
+    depends_on:
+      - redis
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  # === Redis ===
+  redis:
+    image: redis:7-alpine
+    container_name: medqueue-redis
+    ports:
+      - "6380:6379"      # 6379 被本機佔用，改 6380
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+
+volumes:
+  redis_data:

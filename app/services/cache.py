@@ -1,0 +1,105 @@
+"""Redis 快取服務 — 管理即時看診進度快取"""
+
+import json
+import logging
+
+import redis.asyncio as aioredis
+
+from app.config import settings
+from app.schemas.clinic import ClinicProgressData
+
+logger = logging.getLogger(__name__)
+
+
+class CacheService:
+    """Redis 快取管理"""
+
+    def __init__(self):
+        self.redis = aioredis.from_url(
+            settings.redis_url,
+            decode_responses=True,
+        )
+
+    async def store_progress(self, progress_list: list[ClinicProgressData]):
+        """將爬蟲結果存入 Redis 快取"""
+        if not progress_list:
+            return
+
+        hospital_code = progress_list[0].hospital_code
+        pipe = self.redis.pipeline()
+
+        # 清除該醫院舊資料
+        old_keys = await self.redis.keys(f"progress:{hospital_code}:*")
+        if old_keys:
+            pipe.delete(*old_keys)
+
+        # 寫入新資料
+        for p in progress_list:
+            key = p.to_cache_key()
+            pipe.set(key, json.dumps(p.to_dict(), ensure_ascii=False), ex=300)
+
+        # 更新醫院的診間列表索引
+        room_keys = [p.to_cache_key() for p in progress_list]
+        index_key = f"index:{hospital_code}"
+        pipe.delete(index_key)
+        if room_keys:
+            pipe.sadd(index_key, *room_keys)
+            pipe.expire(index_key, 300)
+
+        await pipe.execute()
+        logger.info(f"[cache] 已更新 {hospital_code} 共 {len(progress_list)} 筆")
+
+    async def get_all_progress(self, hospital_code: str) -> list[ClinicProgressData]:
+        """取得某醫院所有診間的即時進度"""
+        index_key = f"index:{hospital_code}"
+        room_keys = await self.redis.smembers(index_key)
+
+        if not room_keys:
+            return []
+
+        results = []
+        for key in room_keys:
+            data = await self.redis.get(key)
+            if data:
+                d = json.loads(data)
+                results.append(ClinicProgressData(
+                    hospital_code=d["hospital_code"],
+                    hospital_name=d["hospital_name"],
+                    date=d["date"],
+                    session=d["session"],
+                    department=d["department"],
+                    doctor_name=d["doctor_name"],
+                    clinic_room=d["clinic_room"],
+                    current_number=d["current_number"],
+                    next_number=d["next_number"],
+                    is_current_skipped=d["is_current_skipped"],
+                    is_next_skipped=d["is_next_skipped"],
+                    fetched_at=__import__("datetime").datetime.fromisoformat(d["fetched_at"]),
+                ))
+
+        return results
+
+    async def search_progress(
+        self,
+        hospital_code: str,
+        department: str | None = None,
+        doctor_name: str | None = None,
+        clinic_room: str | None = None,
+    ) -> list[ClinicProgressData]:
+        """搜尋符合條件的診間進度"""
+        all_progress = await self.get_all_progress(hospital_code)
+
+        results = []
+        for p in all_progress:
+            if department and department not in p.department:
+                continue
+            if doctor_name and doctor_name not in p.doctor_name:
+                continue
+            if clinic_room and clinic_room not in p.clinic_room:
+                continue
+            results.append(p)
+
+        return results
+
+    async def close(self):
+        await self.redis.close()

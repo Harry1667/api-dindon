@@ -1,0 +1,53 @@
+"""Celery 應用設定"""
+
+import os
+from celery import Celery
+from celery.schedules import crontab
+from dotenv import load_dotenv
+
+load_dotenv()
+
+redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
+
+celery_app = Celery(
+    "medical_queue",
+    broker=redis_url,
+    backend=redis_url,
+)
+
+celery_app.conf.update(
+    # 時區
+    timezone="Asia/Taipei",
+    enable_utc=True,
+
+    # 任務序列化
+    task_serializer="json",
+    result_serializer="json",
+    accept_content=["json"],
+
+    # 任務超時（預設值，個別任務可覆蓋）
+    task_soft_time_limit=120,
+    task_time_limit=180,
+
+    # 自動發現任務
+    include=["app.tasks.scrape", "app.tasks.notify", "app.tasks.nhi_sync"],
+
+    # 定時排程 (Celery Beat)
+    beat_schedule={
+        # 每 60 秒抓取看診進度
+        "scrape-all-hospitals": {
+            "task": "app.tasks.scrape.scrape_all_hospitals",
+            "schedule": int(os.getenv("SCRAPE_INTERVAL_SECONDS", "60")),
+        },
+        # 每 60 秒檢查通知
+        "check-and-notify": {
+            "task": "app.tasks.notify.check_and_notify",
+            "schedule": int(os.getenv("SCRAPE_INTERVAL_SECONDS", "60")),
+        },
+        # 每天凌晨 3 點同步 NHI 醫事機構資料
+        "sync-nhi-daily": {
+            "task": "app.tasks.nhi_sync.sync_nhi_institutions",
+            "schedule": crontab(hour=3, minute=0),
+        },
+    },
+)

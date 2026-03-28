@@ -1,0 +1,23 @@
+"""醫院別名資料模型 — 讓使用者可以用簡稱/俗稱查詢醫院"""
+
+from datetime import datetime
+from sqlalchemy import String, Integer, DateTime, ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.models.database import Base
+
+
+class HospitalAlias(Base):
+    __tablename__ = "hospital_aliases"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    hospital_code: Mapped[str] = mapped_column(
+        String(50),
+        ForeignKey("hospitals.code"),
+        nullable=False,
+        comment="對應 hospitals.code",
+    )
+    alias: Mapped[str] = mapped_column(
+        String(100), nullable=False, unique=True, comment="別名（如：三總、北榮）"
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
