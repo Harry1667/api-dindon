@@ -21,6 +21,8 @@ class Hospital(Base):
     district: Mapped[str] = mapped_column(String(10), nullable=False, default="", comment="區/鄉/鎮，如 中正區")
     address: Mapped[str | None] = mapped_column(Text, nullable=True, comment="完整地址")
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="醫院電話")
+    description: Mapped[str | None] = mapped_column(Text, nullable=True, comment="醫院簡介")
+    website: Mapped[str | None] = mapped_column(String(200), nullable=True, comment="醫院官網")
     url: Mapped[str | None] = mapped_column(Text, nullable=True, comment="看診進度查詢網址")
     adapter_name: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="爬蟲 Adapter 名稱，空=尚未接入")
     is_active: Mapped[bool] = mapped_column(Boolean, default=False, comment="是否啟用爬蟲")

@@ -218,6 +218,73 @@ async def update_hospital_aliases(code: str, request: Request, admin_token: str 
     }
 
 
+@router.get("/api/department-guide")
+async def api_department_guide(admin_token: str | None = Cookie(None)):
+    """科別就醫指南"""
+    if not _check_auth(admin_token):
+        return JSONResponse({"error": "未登入"}, status_code=401)
+
+    from sqlalchemy import select
+    from app.models.database import async_session
+    from app.models.department import DepartmentGuide
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(DepartmentGuide).order_by(DepartmentGuide.category, DepartmentGuide.department)
+        )
+        guides = result.scalars().all()
+
+    return [
+        {
+            "id": g.id,
+            "department": g.department,
+            "category": g.category,
+            "disease": g.disease,
+            "symptoms": g.symptoms,
+            "keywords": g.keywords,
+        }
+        for g in guides
+    ]
+
+
+@router.get("/api/doctors")
+async def api_doctors(admin_token: str | None = Cookie(None), hospital_code: str = ""):
+    """醫師清單"""
+    if not _check_auth(admin_token):
+        return JSONResponse({"error": "未登入"}, status_code=401)
+
+    from sqlalchemy import select, func
+    from app.models.database import async_session
+    from app.models.doctor import Doctor
+
+    async with async_session() as session:
+        query = select(Doctor).order_by(Doctor.hospital_code, Doctor.department, Doctor.name)
+        if hospital_code:
+            query = query.where(Doctor.hospital_code == hospital_code)
+        query = query.limit(500)
+        result = await session.execute(query)
+        doctors = result.scalars().all()
+
+        total = (await session.execute(select(func.count(Doctor.id)))).scalar() or 0
+
+    return {
+        "total": total,
+        "count": len(doctors),
+        "doctors": [
+            {
+                "id": d.id,
+                "hospital_code": d.hospital_code,
+                "department": d.department,
+                "name": d.name,
+                "title": d.title,
+                "specialty": d.specialty,
+                "clinic_room": d.clinic_room,
+            }
+            for d in doctors
+        ],
+    }
+
+
 # ============================================================
 # 頁面
 # ============================================================

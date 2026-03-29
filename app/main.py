@@ -22,7 +22,7 @@ import app.models.notification  # noqa: F401
 import app.models.nhi_institution  # noqa: F401
 import app.models.hospital_alias  # noqa: F401
 import app.models.user_query_history  # noqa: F401
-import app.models.department  # noqa: F401
+import app.models.department  # noqa: F401 (Department + DepartmentGuide)
 import app.models.doctor  # noqa: F401
 
 # 設定 logging
@@ -533,6 +533,45 @@ async def search_hospitals_by_area(area: str, limit: int = 50):
                 "departments": (r.departments or "")[:100],
             }
             for r in results
+        ],
+    }
+
+
+@app.get("/api/guide/which-department")
+async def which_department(q: str, limit: int = 10):
+    """查詢症狀/疾病對應的科別（供 LINE Bot 使用）"""
+    from sqlalchemy import select, or_
+    from app.models.database import async_session
+    from app.models.department import DepartmentGuide
+
+    keyword = q.strip()
+    if not keyword:
+        return {"results": []}
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(DepartmentGuide).where(
+                or_(
+                    DepartmentGuide.disease.contains(keyword),
+                    DepartmentGuide.symptoms.contains(keyword),
+                    DepartmentGuide.keywords.contains(keyword),
+                    DepartmentGuide.department.contains(keyword),
+                )
+            ).limit(limit)
+        )
+        guides = result.scalars().all()
+
+    return {
+        "query": keyword,
+        "count": len(guides),
+        "results": [
+            {
+                "department": g.department,
+                "category": g.category,
+                "disease": g.disease,
+                "symptoms": g.symptoms,
+            }
+            for g in guides
         ],
     }
 
