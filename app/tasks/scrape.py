@@ -8,6 +8,8 @@ import os
 from app.tasks.celery_app import celery_app
 from app.scrapers.registry import AdapterRegistry
 from app.services.cache import CacheService
+from app.models.database import async_session
+from app.models.clinic_progress import ClinicProgress
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +108,28 @@ async def _scrape_all():
 
             if progress_list:
                 await cache.store_progress(progress_list)
+
+                # 同時寫入 MySQL clinic_progress 表
+                try:
+                    async with async_session() as session:
+                        for p in progress_list:
+                            session.add(ClinicProgress(
+                                hospital_code=p.hospital_code,
+                                date=p.date,
+                                session=p.session,
+                                department=p.department,
+                                doctor_name=p.doctor_name,
+                                clinic_room=p.clinic_room,
+                                current_number=p.current_number,
+                                next_number=p.next_number,
+                                is_current_skipped=p.is_current_skipped,
+                                is_next_skipped=p.is_next_skipped,
+                                fetched_at=p.fetched_at,
+                            ))
+                        await session.commit()
+                except Exception as db_err:
+                    logger.error(f"[scrape] {adapter.hospital_name} 寫入 MySQL 失敗: {db_err}")
+
                 logger.info(f"[scrape] {adapter.hospital_name} 完成，{len(progress_list)} 個診間")
                 _record_result(code, has_data=True)
             else:

@@ -30,7 +30,7 @@ celery_app.conf.update(
     task_time_limit=180,
 
     # 自動發現任務
-    include=["app.tasks.scrape", "app.tasks.notify", "app.tasks.nhi_sync"],
+    include=["app.tasks.scrape", "app.tasks.notify", "app.tasks.nhi_sync", "app.tasks.sync_master_data"],
 
     # 定時排程 (Celery Beat)
     beat_schedule={
@@ -48,6 +48,11 @@ celery_app.conf.update(
         "sync-nhi-daily": {
             "task": "app.tasks.nhi_sync.sync_nhi_institutions",
             "schedule": crontab(hour=3, minute=0),
+        },
+        # 每天凌晨 4 點同步診科/醫生主檔（從各醫院爬蟲提取）
+        "sync-master-data-daily": {
+            "task": "app.tasks.sync_master_data.sync_master_data",
+            "schedule": crontab(hour=4, minute=0),
         },
     },
 )

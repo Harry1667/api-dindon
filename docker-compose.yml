@@ -1,6 +1,27 @@
 version: "3.8"
 
 services:
+  # === LINE Bot 測試版（demo_chat 測試資料）===
+  linebot:
+    build: .
+    container_name: ajz-dindon
+    command: uvicorn line_bot:app --host 0.0.0.0 --port 5000 --workers 1
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   # === FastAPI 主應用 ===
   app:
     build: .

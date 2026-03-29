@@ -21,6 +21,8 @@ import app.models.notification  # noqa: F401
 import app.models.nhi_institution  # noqa: F401
 import app.models.hospital_alias  # noqa: F401
 import app.models.user_query_history  # noqa: F401
+import app.models.department  # noqa: F401
+import app.models.doctor  # noqa: F401
 
 # 設定 logging
 logging.basicConfig(
@@ -244,6 +246,64 @@ async def get_live_progress(hospital_code: str):
         "count": len(progress_list),
         "data": [p.to_dict() for p in progress_list],
     }
+
+
+@app.post("/api/admin/sync-master-data")
+async def trigger_sync_master_data():
+    """手動觸發診科/醫生主檔同步（從各醫院爬蟲抓取後寫入 MySQL）"""
+    from app.tasks.sync_master_data import sync_master_data
+    task = sync_master_data.delay()
+    return {"task_id": task.id, "status": "queued"}
+
+
+@app.get("/api/departments/{hospital_code}")
+async def list_departments(hospital_code: str):
+    """查詢某醫院的所有診科"""
+    from sqlalchemy import select
+    from app.models.database import async_session
+    from app.models.department import Department
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Department)
+            .where(Department.hospital_code == hospital_code)
+            .order_by(Department.name)
+        )
+        departments = result.scalars().all()
+        return {
+            "hospital_code": hospital_code,
+            "count": len(departments),
+            "departments": [d.name for d in departments],
+        }
+
+
+@app.get("/api/doctors/{hospital_code}")
+async def list_doctors(hospital_code: str, department: str | None = None):
+    """查詢某醫院的所有醫生（可依科別篩選）"""
+    from sqlalchemy import select
+    from app.models.database import async_session
+    from app.models.doctor import Doctor
+
+    async with async_session() as session:
+        query = select(Doctor).where(Doctor.hospital_code == hospital_code)
+        if department:
+            query = query.where(Doctor.department == department)
+        query = query.order_by(Doctor.department, Doctor.name)
+
+        result = await session.execute(query)
+        doctors = result.scalars().all()
+        return {
+            "hospital_code": hospital_code,
+            "count": len(doctors),
+            "doctors": [
+                {
+                    "department": d.department,
+                    "name": d.name,
+                    "clinic_room": d.clinic_room,
+                }
+                for d in doctors
+            ],
+        }
 
 
 @app.post("/api/admin/sync-nhi")
