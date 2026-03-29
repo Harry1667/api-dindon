@@ -51,6 +51,15 @@ class NtuhAdapter(BaseHospitalAdapter):
 
         all_results = []
         async with httpx.AsyncClient(timeout=15.0) as client:
+            # 先訪問主頁面取得 session cookie
+            try:
+                await client.get(
+                    f"https://reg.ntuh.gov.tw/WebReg/WebReg/ClinicCurrentLightNo?vHospCode={self.hosp_code}",
+                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+                )
+            except Exception:
+                pass
+
             for time_code in active_times:
                 for dept in NTUH_DEPTS:
                     try:
@@ -74,7 +83,7 @@ class NtuhAdapter(BaseHospitalAdapter):
         time_code: str,
         now: datetime,
     ) -> list[ClinicProgressData]:
-        """查詢單一科別+時段"""
+        """查詢單一科別+時段（先訪問主頁取得 session）"""
         resp = await client.post(
             self.base_url,
             data={
@@ -88,6 +97,9 @@ class NtuhAdapter(BaseHospitalAdapter):
                 "X-Requested-With": "XMLHttpRequest",
             },
         )
+        # 500 = 非看診時間或該科別無資料，不視為錯誤
+        if resp.status_code == 500:
+            return []
         resp.raise_for_status()
         return self._parse_html(resp.text, time_code, now)
 

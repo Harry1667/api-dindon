@@ -4,6 +4,8 @@
 技術：GET 帶參數 → HTML table
 科別頁面：type=realtime（顯示所有科別連結）
 科別進度：type=dept&deptCode={code}&ampm={1|2|3}
+
+注意：此網站有 Cloudflare 保護，需要完整 browser-like headers
 """
 
 import logging
@@ -23,6 +25,20 @@ TW_TZ = timezone(timedelta(hours=8))
 BASE_URL = "https://www6.vghtpe.gov.tw/reg/realTime.do"
 
 TIME_NAMES = {"1": "上午診", "2": "下午診", "3": "夜診"}
+
+# 完整的 browser headers 以通過 Cloudflare
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+}
 
 
 class TpvghAdapter(BaseHospitalAdapter):
@@ -51,7 +67,7 @@ class TpvghAdapter(BaseHospitalAdapter):
 
         # Step 2: 遍歷有效時段+科別
         all_results = []
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
             for ampm in active_times:
                 for dept_code, dept_name in dept_codes:
                     try:
@@ -70,12 +86,22 @@ class TpvghAdapter(BaseHospitalAdapter):
     async def _fetch_departments(self) -> list[tuple[str, str]]:
         """從科別總覽頁面解析所有科別連結"""
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
                 resp = await client.get(
                     self.base_url,
                     params={"type": "realtime"},
-                    headers={"User-Agent": "Mozilla/5.0"},
+                    headers=BROWSER_HEADERS,
                 )
+                # Cloudflare 403 = 被擋
+                if resp.status_code == 403:
+                    logger.warning(f"[{self.hospital_code}] Cloudflare 403，嘗試直接存取...")
+                    # 嘗試不帶 params
+                    resp = await client.get(self.base_url, headers=BROWSER_HEADERS)
+
+                if resp.status_code == 403:
+                    logger.error(f"[{self.hospital_code}] 被 Cloudflare 擋下，需要瀏覽器環境")
+                    return []
+
                 resp.raise_for_status()
         except httpx.HTTPError as e:
             logger.error(f"[{self.hospital_code}] 取科別列表失敗: {e}")
@@ -124,8 +150,10 @@ class TpvghAdapter(BaseHospitalAdapter):
         resp = await client.get(
             self.base_url,
             params={"type": "dept", "deptCode": dept_code, "ampm": ampm},
-            headers={"User-Agent": "Mozilla/5.0"},
+            headers=BROWSER_HEADERS,
         )
+        if resp.status_code == 403:
+            return []
         resp.raise_for_status()
         return self._parse_dept_html(resp.text, dept_name, ampm, now)
 
@@ -152,16 +180,20 @@ class TpvghAdapter(BaseHospitalAdapter):
                 if any(kw in " ".join(texts) for kw in ["診別", "燈號", "醫師姓名"]):
                     continue
 
-                # 提取號碼
+                # 提取欄位
                 doctor = ""
                 clinic_room = ""
                 current_number = 0
 
-                for i, text in enumerate(texts):
-                    nums = re.findall(r"\d+", text)
-                    if nums and len(text) < 8 and not doctor:
+                for text in texts:
+                    if not text:
+                        continue
+                    nums = re.findall(r"^\d+$", text)
+                    if nums and current_number == 0:
                         current_number = int(nums[0])
-                    elif len(text) > 1 and len(text) < 20:
+                    elif re.match(r"^\d+診$", text):
+                        clinic_room = text
+                    elif len(text) >= 2 and len(text) <= 10:
                         if not doctor:
                             doctor = text
                         elif not clinic_room:
