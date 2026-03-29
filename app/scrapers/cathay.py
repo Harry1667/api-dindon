@@ -152,3 +152,8 @@ class CathayAdapter(BaseHospitalAdapter):
     async def get_departments(self) -> list[str]:
         all_progress = await self.fetch_all_progress()
         return sorted(set(p.department for p in all_progress))
+
+
+# === 預建院區 ===
+# hosarea: 1=總院(台北), 3=新竹國泰, 4=汐止國泰
+cathay_xizhi = CathayAdapter("cathay-xizhi", "汐止國泰", "4")

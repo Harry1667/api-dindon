@@ -26,11 +26,10 @@
                                                                ▼
                                                     ┌─── 本地 Linux ────┐
                                                     │  Docker Desktop    │
-                                                    │  ├─ FastAPI :8000  │
+                                                    │  ├─ FastAPI :8001  │
                                                     │  ├─ Celery Worker  │
                                                     │  ├─ Celery Beat    │
-                                                    │  ├─ Redis          │
-                                                    │  └─ MySQL (dev)    │
+                                                    │  └─ Redis          │
                                                     └────────────────────┘
 ```
 
@@ -40,11 +39,12 @@
 |------|---------|---------|
 | LINE Channel | `叮咚到號` | `叮咚到號-DEV`（新建） |
 | Webhook URL | `https://dindon.cleanhome.tw/webhook` | `https://dev-dindon.cleanhome.tw/webhook` |
-| MySQL | VPS aaPanel MySQL | 本地 Docker MySQL |
+| MySQL | VPS aaPanel MySQL | VPS aaPanel MySQL（共用） |
 | Redis | Docker 內部 | Docker 內部 |
 | docker-compose | `docker-compose.yml` | `docker-compose.dev.yml` |
 | .env | `.env` | `.env.dev` |
-| 爬蟲頻率 | 60 秒 | 300 秒（省流量） |
+| 本地 Port | 8000 | 8001（避免與其他專案衝突） |
+| 爬蟲頻率 | 60 秒 | 60 秒 |
 | 推播對象 | 所有用戶 | 只有你自己 |
 
 ---
@@ -150,16 +150,16 @@ sudo systemctl restart sshd
 ### 4a. 更新 `.env.dev`
 
 ```env
-# === LINE Official Account（DEV Channel）===
-LINE_CHANNEL_SECRET=<你的DEV-Channel-Secret>
-LINE_CHANNEL_ACCESS_TOKEN=<你的DEV-Channel-Access-Token>
+# === LINE Official Account ===
+LINE_CHANNEL_SECRET=<你的Channel-Secret>
+LINE_CHANNEL_ACCESS_TOKEN=<你的Channel-Access-Token>
 
-# === MySQL（本地 Docker）===
-MYSQL_HOST=mysql
+# === MySQL（連遠端 aaPanel）===
+MYSQL_HOST=57.182.129.192
 MYSQL_PORT=3306
-MYSQL_USER=dindon_dev
-MYSQL_PASSWORD=dindon_dev_2024
-MYSQL_DATABASE=dindon_dev
+MYSQL_USER=ajz-dindon
+MYSQL_PASSWORD=<你的密碼>
+MYSQL_DATABASE=ajz-dindon
 
 # === Redis（Docker 內部）===
 REDIS_URL=redis://redis:6379/0
@@ -167,7 +167,7 @@ REDIS_URL=redis://redis:6379/0
 # === 應用設定 ===
 APP_ENV=development
 APP_DEBUG=true
-SCRAPE_INTERVAL_SECONDS=300
+SCRAPE_INTERVAL_SECONDS=60
 NOTIFY_THRESHOLD=5
 
 # === 管理後台 ===
@@ -175,10 +175,9 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=dindon2024
 ```
 
-> **重點改動：**
-> - LINE credentials 換成 DEV Channel 的
-> - MySQL 改用本地 Docker（不連遠端 VPS）
-> - 爬蟲間隔改 300 秒
+> **重點：**
+> - MySQL 連遠端 VPS aaPanel（正式與開發共用資料庫）
+> - LINE credentials 填入你的 Channel 資訊
 
 ### 4b. 更新 `docker-compose.dev.yml`
 
@@ -189,17 +188,14 @@ services:
   # === FastAPI 主應用（開發模式）===
   app:
     build: .
-    container_name: medqueue-app-dev
+    container_name: medqueue-app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     ports:
-      - "8000:8000"
+      - "8001:8000"
     env_file:
       - .env.dev
     depends_on:
-      mysql:
-        condition: service_healthy
-      redis:
-        condition: service_started
+      - redis
     volumes:
       - .:/app
       - ./logs:/app/logs
@@ -208,15 +204,12 @@ services:
   # === Celery Worker ===
   worker:
     build: .
-    container_name: medqueue-worker-dev
+    container_name: medqueue-worker
     command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
     env_file:
       - .env.dev
     depends_on:
-      mysql:
-        condition: service_healthy
-      redis:
-        condition: service_started
+      - redis
     volumes:
       - .:/app
       - ./logs:/app/logs
@@ -225,62 +218,38 @@ services:
   # === Celery Beat ===
   beat:
     build: .
-    container_name: medqueue-beat-dev
+    container_name: medqueue-beat
     command: celery -A app.tasks.celery_app beat --loglevel=info
     env_file:
       - .env.dev
     depends_on:
-      redis:
-        condition: service_started
+      - redis
     volumes:
       - .:/app
       - ./logs:/app/logs
     restart: unless-stopped
 
-  # === MySQL（開發專用）===
-  mysql:
-    image: mysql:8.0
-    container_name: medqueue-mysql-dev
-    environment:
-      MYSQL_ROOT_PASSWORD: root_dev_2024
-      MYSQL_DATABASE: dindon_dev
-      MYSQL_USER: dindon_dev
-      MYSQL_PASSWORD: dindon_dev_2024
-    ports:
-      - "3307:3306"
-    volumes:
-      - mysql_dev_data:/var/lib/mysql
-    restart: unless-stopped
-    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # === Redis ===
   redis:
     image: redis:7-alpine
-    container_name: medqueue-redis-dev
+    container_name: medqueue-redis
     ports:
       - "6380:6379"
     volumes:
-      - redis_dev_data:/data
+      - redis_data:/data
     restart: unless-stopped
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
 
 volumes:
-  mysql_dev_data:
-  redis_dev_data:
+  redis_data:
 ```
 
 > **和正式版的差異：**
-> - container 名稱加 `-dev` 後綴，避免衝突
-> - 新增 MySQL 容器（正式版用 aaPanel 外部 MySQL）
+> - 本地 port 用 8001（避免與其他專案衝突）
+> - MySQL 不在 Docker 內，連遠端 VPS aaPanel MySQL
 > - FastAPI 加 `--reload`（改 code 自動重啟）
 > - 掛載原始碼 volume（熱更新）
 > - Redis port 用 6380 避免和本機衝突
-> - MySQL port 用 3307 避免衝突
 
 ---
 
@@ -298,41 +267,25 @@ docker compose -f docker-compose.dev.yml up --build -d
 docker compose -f docker-compose.dev.yml ps
 ```
 
-應該看到 5 個容器都是 `Up`：
+應該看到 4 個容器都是 `Up`：
 
 ```
-medqueue-app-dev      ... Up   0.0.0.0:8000->8000/tcp
-medqueue-worker-dev   ... Up
-medqueue-beat-dev     ... Up
-medqueue-mysql-dev    ... Up   0.0.0.0:3307->3306/tcp
-medqueue-redis-dev    ... Up   0.0.0.0:6380->6379/tcp
+medqueue-app      ... Up   0.0.0.0:8001->8000/tcp
+medqueue-worker   ... Up
+medqueue-beat     ... Up
+medqueue-redis    ... Up   0.0.0.0:6380->6379/tcp
 ```
+
+> **注意：** 本地 port 用 8001，因為 8000 可能被其他專案佔用
 
 ### 5b. 驗證本地服務
 
 ```bash
 # 測試 API
-curl http://localhost:8000/health
-
-# 測試 MySQL 連線
-docker exec medqueue-mysql-dev mysql -u dindon_dev -pdindon_dev_2024 dindon_dev -e "SHOW TABLES;"
+curl http://localhost:8001/health
 
 # 測試 Redis
-docker exec medqueue-redis-dev redis-cli ping
-```
-
-### 5c. 初始化資料庫（首次啟動）
-
-```bash
-# 進入 app 容器執行 migration
-docker exec medqueue-app-dev python -c "
-from app.models.base import Base
-from app.config import settings
-from sqlalchemy import create_engine
-engine = create_engine(settings.database_url.replace('+aiomysql', '+pymysql'))
-Base.metadata.create_all(engine)
-print('Tables created successfully')
-"
+docker exec medqueue-redis redis-cli ping
 ```
 
 ---
@@ -342,12 +295,12 @@ print('Tables created successfully')
 ### 6a. 啟動隧道
 
 ```bash
-ssh -R 9000:localhost:8000 root@57.182.129.192 -N -o ServerAliveInterval=60
+ssh -R 9000:localhost:8001 root@57.182.129.192 -N -o ServerAliveInterval=60
 ```
 
 | 參數 | 說明 |
 |------|------|
-| `-R 9000:localhost:8000` | VPS 的 9000 port → 本地的 8000 port |
+| `-R 9000:localhost:8001` | VPS 的 9000 port → 本地的 8001 port |
 | `-N` | 不開 shell，只建隧道 |
 | `-o ServerAliveInterval=60` | 每 60 秒送心跳，防止斷線 |
 
@@ -373,7 +326,7 @@ curl https://dev-dindon.cleanhome.tw/health
 
 ```bash
 # 叮咚到號 開發隧道
-alias dev-tunnel='ssh -R 9000:localhost:8000 root@57.182.129.192 -N -o ServerAliveInterval=60'
+alias dev-tunnel='ssh -R 9000:localhost:8001 root@57.182.129.192 -N -o ServerAliveInterval=60'
 
 # 叮咚到號 開發環境 啟動/停止
 alias dev-up='cd /home/linux/Dropbox/84-WebCode/00-gemini/6-linux/5-ajz/linebot-medicalqueue && docker compose -f docker-compose.dev.yml up --build -d'
@@ -468,16 +421,13 @@ docker compose -f docker-compose.dev.yml logs -f app
 docker compose -f docker-compose.dev.yml logs -f worker
 
 # 進入 app 容器 debug
-docker exec -it medqueue-app-dev bash
-
-# 進入 MySQL
-docker exec -it medqueue-mysql-dev mysql -u dindon_dev -pdindon_dev_2024 dindon_dev
+docker exec -it medqueue-app bash
 
 # 進入 Redis
-docker exec -it medqueue-redis-dev redis-cli
+docker exec -it medqueue-redis redis-cli
 
 # 手動觸發爬蟲測試
-docker exec medqueue-app-dev python -c "
+docker exec medqueue-app python -c "
 from app.scrapers.registry import adapter_registry
 import asyncio
 
@@ -509,32 +459,20 @@ dev-tunnel
 sudo apt install autossh
 
 # 使用（會自動重連）
-autossh -M 0 -R 9000:localhost:8000 root@57.182.129.192 -N -o ServerAliveInterval=60 -o ServerAliveCountMax=3
+autossh -M 0 -R 9000:localhost:8001 root@57.182.129.192 -N -o ServerAliveInterval=60 -o ServerAliveCountMax=3
 ```
 
 加到 alias：
 
 ```bash
-alias dev-tunnel='autossh -M 0 -R 9000:localhost:8000 root@57.182.129.192 -N -o ServerAliveInterval=60 -o ServerAliveCountMax=3'
-```
-
-### MySQL 容器啟動失敗
-
-```bash
-# 看 log
-docker compose -f docker-compose.dev.yml logs mysql
-
-# 清除資料重來
-docker compose -f docker-compose.dev.yml down -v
-docker compose -f docker-compose.dev.yml up --build -d
+alias dev-tunnel='autossh -M 0 -R 9000:localhost:8001 root@57.182.129.192 -N -o ServerAliveInterval=60 -o ServerAliveCountMax=3'
 ```
 
 ### Port 衝突
 
 ```bash
 # 確認 port 是否被佔用
-sudo lsof -i :8000
-sudo lsof -i :3307
+sudo lsof -i :8001
 sudo lsof -i :6380
 ```
 
@@ -549,6 +487,5 @@ sudo lsof -i :6380
 ## 安全提醒
 
 - `.env` 和 `.env.dev` 已在 `.gitignore` 中，不會被提交
-- DEV Channel 的 token 只用於開發，不要混用到正式環境
 - SSH 隧道只綁定 VPS 的 `127.0.0.1:9000`，外部無法直接存取
-- 本地 MySQL 密碼僅供開發，不需要高強度
+- 開發環境與正式環境共用 MySQL，修改資料時請注意

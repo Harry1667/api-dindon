@@ -27,12 +27,21 @@ TW_TZ = timezone(timedelta(hours=8))
 BASE_URL = "https://nreg.tph.mohw.gov.tw/OReg"
 
 
-class TphAdapter(BaseHospitalAdapter):
-    """衛福部臺北醫院 Adapter — JSON API"""
+class MohwOregAdapter(BaseHospitalAdapter):
+    """衛福部醫院通用 Adapter — OReg 系統 JSON API
 
-    hospital_code = "tph"
-    hospital_name = "衛福部臺北醫院"
-    base_url = f"{BASE_URL}/VisitProgressPage"
+    適用於使用 OReg 掛號系統的衛福部醫院：
+    - 臺北醫院: nreg.tph.mohw.gov.tw
+    - 豐原醫院: nreg.fyh.mohw.gov.tw
+    - 未來可擴展更多
+    """
+
+    def __init__(self, hospital_code: str, hospital_name: str, domain: str):
+        self.hospital_code = hospital_code
+        self.hospital_name = hospital_name
+        self.domain = domain
+        self.base_url = f"https://{domain}/OReg/VisitProgressPage"
+        self._api_base = f"https://{domain}/OReg"
 
     async def fetch_all_progress(self) -> list[ClinicProgressData]:
         now = datetime.now(TW_TZ)
@@ -51,7 +60,7 @@ class TphAdapter(BaseHospitalAdapter):
 
                 # 取得看診進度
                 resp = await client.post(
-                    f"{BASE_URL}/GetVisitedProcess",
+                    f"{self._api_base}/GetVisitedProcess",
                     data={},
                     headers=headers,
                 )
@@ -124,7 +133,7 @@ class TphAdapter(BaseHospitalAdapter):
             async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, verify=False) as client:
                 await client.get(self.base_url)
                 resp = await client.post(
-                    f"{BASE_URL}/GetSectCategoryList",
+                    f"{self._api_base}/GetSectCategoryList",
                     data={},
                     headers={"X-Requested-With": "XMLHttpRequest"},
                 )
@@ -132,3 +141,11 @@ class TphAdapter(BaseHospitalAdapter):
                 return [d.get("sectsuname", "") for d in data if d.get("sectsuname")]
         except Exception:
             return []
+
+
+# 向後相容
+TphAdapter = MohwOregAdapter
+
+# === 預建醫院實例 ===
+tph_adapter = MohwOregAdapter("tph", "衛福部臺北醫院", "nreg.tph.mohw.gov.tw")
+fyh_adapter = MohwOregAdapter("fyh-mohw", "衛福部豐原醫院", "nreg.fyh.mohw.gov.tw")

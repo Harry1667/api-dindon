@@ -7,7 +7,7 @@ services:
     container_name: medqueue-app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     ports:
-      - "8000:8000"
+      - "8001:8000"
     env_file:
       - .env.dev
     depends_on:

@@ -10,6 +10,7 @@ load_dotenv()
 
 from app.config import settings
 from app.api.webhook import router as webhook_router
+from app.api.admin import router as admin_router
 from app.models.database import engine, Base
 
 # 確保所有 Model 都被 import，create_all 才能建立資料表
@@ -82,17 +83,20 @@ async def _seed_hospitals():
         {"code": "mackay-tamsui",      "name": "台灣基督長老教會馬偕醫療財團法人淡水馬偕紀念醫院", "short_name": "馬偕醫院(淡水)", "level": "醫學中心", "city": "新北市", "district": "淡水區", "phone": "02-28094661", "url": "https://www.mmh.org.tw/progressstatus.php", "adapter_name": "MackayAdapter", "is_active": True, "scrape_interval": 60},
         {"code": "shuangho",           "name": "衛生福利部雙和醫院(委託臺北醫學大學興建經營)", "short_name": "雙和醫院", "level": "醫學中心", "city": "新北市", "district": "中和區", "phone": "02-22490088", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "changgung-linkou",   "name": "長庚醫療財團法人林口長庚紀念醫院", "short_name": "林口長庚", "level": "醫學中心", "city": "桃園市", "district": "龜山區", "phone": "03-3281200", "url": "https://register.cgmh.org.tw/Progress/3", "adapter_name": "ChangGungAdapter", "is_active": True, "scrape_interval": 60},
+        {"code": "changgung-taoyuan", "name": "長庚醫療財團法人桃園長庚紀念醫院", "short_name": "桃園長庚", "level": "區域醫院", "city": "桃園市", "district": "龜山區", "phone": "03-3196200", "url": "https://register.cgmh.org.tw/Progress/5", "adapter_name": "ChangGungAdapter", "is_active": True, "scrape_interval": 60},
         {"code": "ntuh-hsinchu",       "name": "國立臺灣大學醫學院附設醫院新竹臺大分院新竹醫院", "short_name": "新竹台大", "level": "醫學中心", "city": "新竹市", "district": "北區", "phone": "03-5326151", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "tcvgh",              "name": "臺中榮民總醫院", "short_name": "台中榮總", "level": "醫學中心", "city": "臺中市", "district": "西屯區", "phone": "04-23592525", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "csh",                "name": "中山醫學大學附設醫院", "short_name": "中山醫大附醫", "level": "醫學中心", "city": "臺中市", "district": "南區", "phone": "04-24739595", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "cmuh",               "name": "中國醫藥大學附設醫院", "short_name": "中國醫", "level": "醫學中心", "city": "臺中市", "district": "北區", "phone": "04-22052121", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "cch",                "name": "彰化基督教醫療財團法人彰化基督教醫院", "short_name": "彰基", "level": "醫學中心", "city": "彰化縣", "district": "彰化市", "phone": "04-7238595", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "ntuh-yunlin",        "name": "國立臺灣大學醫學院附設醫院雲林分院及其虎尾院區", "short_name": "台大雲林", "level": "醫學中心", "city": "雲林縣", "district": "斗六市", "phone": "05-5323911", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
+        {"code": "changgung-yunlin",  "name": "長庚醫療財團法人雲林長庚紀念醫院", "short_name": "雲林長庚", "level": "區域醫院", "city": "雲林縣", "district": "麥寮鄉", "phone": "05-6915151", "url": "https://register.cgmh.org.tw/Progress/M", "adapter_name": "ChangGungAdapter", "is_active": True, "scrape_interval": 60},
         {"code": "tzuchi-dalin",       "name": "佛教慈濟醫療財團法人大林慈濟醫院", "short_name": "大林慈濟", "level": "醫學中心", "city": "嘉義縣", "district": "大林鎮", "phone": "05-2648000", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "nckuh",              "name": "國立成功大學醫學院附設醫院", "short_name": "成大醫院", "level": "醫學中心", "city": "臺南市", "district": "北區", "phone": "06-2353535", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "chimei",             "name": "奇美醫療財團法人奇美醫院及其樹林院區", "short_name": "奇美醫院", "level": "醫學中心", "city": "臺南市", "district": "永康區", "phone": "06-2812811", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "ksvgh",              "name": "高雄榮民總醫院", "short_name": "高雄榮總", "level": "醫學中心", "city": "高雄市", "district": "左營區", "phone": "07-3422121", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "changgung-kaohsiung","name": "長庚醫療財團法人高雄長庚紀念醫院", "short_name": "高雄長庚", "level": "醫學中心", "city": "高雄市", "district": "鳥松區", "phone": "07-7317123", "url": "https://register.cgmh.org.tw/Progress/8", "adapter_name": "ChangGungAdapter", "is_active": True, "scrape_interval": 60},
+        {"code": "changgung-fengshan","name": "長庚醫療財團法人鳳山長庚紀念醫院", "short_name": "鳳山長庚", "level": "區域醫院", "city": "高雄市", "district": "鳳山區", "phone": "07-7418151", "url": "https://register.cgmh.org.tw/Progress/T", "adapter_name": "ChangGungAdapter", "is_active": True, "scrape_interval": 60},
         {"code": "edah",               "name": "義大醫療財團法人義大醫院", "short_name": "義大醫院", "level": "醫學中心", "city": "高雄市", "district": "燕巢區", "phone": "07-6150011", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "kmuh",               "name": "財團法人私立高雄醫學大學附設中和紀念醫院", "short_name": "高醫附醫", "level": "醫學中心", "city": "高雄市", "district": "三民區", "phone": "07-3121101", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "tzuchi-hualien",     "name": "佛教慈濟醫療財團法人花蓮慈濟醫院", "short_name": "花蓮慈濟", "level": "醫學中心", "city": "花蓮縣", "district": "花蓮市", "phone": "03-8561825", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
@@ -106,7 +110,7 @@ async def _seed_hospitals():
         {"code": "kaohsiung-united",   "name": "高雄市立聯合醫院", "short_name": "高雄聯合醫院", "level": "區域醫院", "city": "高雄市", "district": "鼓山區", "phone": "07-5552565", "url": "https://api.kcg.gov.tw/api/service/Get/8cd9aba3-bbbc-4801-b267-5e9ee9ff50a6", "adapter_name": "KaohsiungUnitedAdapter", "is_active": True, "scrape_interval": 60},
         # ===================== 區域醫院 — 未接入（依衛福部名單）=====================
         {"code": "keelung-mohw",       "name": "衛生福利部基隆醫院", "short_name": "部基", "level": "區域醫院", "city": "基隆市", "district": "信義區", "phone": "02-24292525", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
-        {"code": "changgung-keelung",  "name": "長庚醫療財團法人基隆長庚紀念醫院及其情人湖院區", "short_name": "基隆長庚", "level": "區域醫院", "city": "基隆市", "district": "安樂區", "phone": "02-24313131", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
+        {"code": "changgung-keelung",  "name": "長庚醫療財團法人基隆長庚紀念醫院及其情人湖院區", "short_name": "基隆長庚", "level": "區域醫院", "city": "基隆市", "district": "安樂區", "phone": "02-24313131", "url": "https://register.cgmh.org.tw/Progress/2", "adapter_name": "ChangGungAdapter", "is_active": True, "scrape_interval": 60},
         {"code": "tpech-zhongxing",    "name": "臺北市立聯合醫院中興院區", "short_name": "聯醫中興", "level": "區域醫院", "city": "臺北市", "district": "大同區", "phone": "02-25523234", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "tpech-yangming",     "name": "臺北市立聯合醫院陽明院區", "short_name": "聯醫陽明", "level": "區域醫院", "city": "臺北市", "district": "士林區", "phone": "02-28353456", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "tpech-heping",       "name": "臺北市立聯合醫院和平婦幼院區及其婦幼院區", "short_name": "聯醫和平", "level": "區域醫院", "city": "臺北市", "district": "中正區", "phone": "02-23889595", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
@@ -117,10 +121,10 @@ async def _seed_hospitals():
         {"code": "tah",                "name": "基督復臨安息日會醫療財團法人臺安醫院", "short_name": "臺安醫院", "level": "區域醫院", "city": "臺北市", "district": "松山區", "phone": "02-27718151", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "kfsyscc",            "name": "醫療財團法人辜公亮基金會和信治癌中心醫院", "short_name": "和信醫院", "level": "區域醫院", "city": "臺北市", "district": "北投區", "phone": "02-28970011", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "eck",                "name": "行天宮醫療志業醫療財團法人恩主公醫院", "short_name": "恩主公醫院", "level": "區域醫院", "city": "新北市", "district": "三峽區", "phone": "02-26723456", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
-        {"code": "cathay-xizhi",       "name": "國泰醫療財團法人汐止國泰綜合醫院", "short_name": "汐止國泰", "level": "區域醫院", "city": "新北市", "district": "汐止區", "phone": "02-26482121", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
-        {"code": "changgung-tucheng",  "name": "新北市立土城醫院(委託長庚醫療財團法人興建經營)", "short_name": "土城長庚", "level": "區域醫院", "city": "新北市", "district": "土城區", "phone": "02-22630588", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
+        {"code": "cathay-xizhi",       "name": "國泰醫療財團法人汐止國泰綜合醫院", "short_name": "汐止國泰", "level": "區域醫院", "city": "新北市", "district": "汐止區", "phone": "02-26482121", "url": "https://reg.cgh.org.tw/tw/reg/RealTimeTable.jsp", "adapter_name": "CathayAdapter", "is_active": True, "scrape_interval": 60},
+        {"code": "changgung-tucheng",  "name": "新北市立土城醫院(委託長庚醫療財團法人興建經營)", "short_name": "土城長庚", "level": "區域醫院", "city": "新北市", "district": "土城區", "phone": "02-22630588", "url": "https://register.cgmh.org.tw/Progress/V", "adapter_name": "ChangGungAdapter", "is_active": True, "scrape_interval": 60},
         {"code": "cth",                "name": "天主教耕莘醫療財團法人耕莘醫院", "short_name": "耕莘醫院", "level": "區域醫院", "city": "新北市", "district": "新店區", "phone": "02-22193391", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
-        {"code": "fjuh",               "name": "輔仁大學學校財團法人輔仁大學附設醫院", "short_name": "輔大醫院", "level": "區域醫院", "city": "新北市", "district": "泰山區", "phone": "02-85128888", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
+        {"code": "fjuh",               "name": "輔仁大學學校財團法人輔仁大學附設醫院", "short_name": "輔大醫院", "level": "區域醫院", "city": "新北市", "district": "泰山區", "phone": "02-85128888", "url": "https://www.hospital.fju.edu.tw/Process", "adapter_name": "FjuhAdapter", "is_active": True, "scrape_interval": 60},
         {"code": "tygh-mohw",          "name": "衛生福利部桃園醫院", "short_name": "部桃", "level": "區域醫院", "city": "桃園市", "district": "桃園區", "phone": "03-3699721", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "aftygh",             "name": "國軍桃園總醫院附設民眾診療服務處", "short_name": "國軍桃園", "level": "區域醫院", "city": "桃園市", "district": "龍潭區", "phone": "03-4799595", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "tpvgh-taoyuan",      "name": "臺北榮民總醫院桃園分院", "short_name": "北榮桃園", "level": "區域醫院", "city": "桃園市", "district": "桃園區", "phone": "03-3384889", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
@@ -135,7 +139,7 @@ async def _seed_hospitals():
         {"code": "miaoli-mohw",        "name": "衛生福利部苗栗醫院", "short_name": "部苗", "level": "區域醫院", "city": "苗栗縣", "district": "苗栗市", "phone": "037-261920", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "weigong",            "name": "為恭醫療財團法人為恭紀念醫院及其東興院區", "short_name": "為恭醫院", "level": "區域醫院", "city": "苗栗縣", "district": "頭份市", "phone": "037-676811", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "taichung-mohw",      "name": "衛生福利部臺中醫院", "short_name": "部中", "level": "區域醫院", "city": "臺中市", "district": "西區", "phone": "04-22294411", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
-        {"code": "fyh-mohw",           "name": "衛生福利部豐原醫院", "short_name": "部豐", "level": "區域醫院", "city": "臺中市", "district": "豐原區", "phone": "04-25271180", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
+        {"code": "fyh-mohw",           "name": "衛生福利部豐原醫院", "short_name": "部豐", "level": "區域醫院", "city": "臺中市", "district": "豐原區", "phone": "04-25271180", "url": "https://nreg.fyh.mohw.gov.tw/OReg/VisitProgressPage", "adapter_name": "MohwOregAdapter", "is_active": True, "scrape_interval": 60},
         {"code": "ndmctsgh-tc",        "name": "國軍臺中總醫院附設民眾診療服務處", "short_name": "國軍台中", "level": "區域醫院", "city": "臺中市", "district": "太平區", "phone": "04-23934191", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "lshosp",             "name": "林新醫療社團法人林新醫院", "short_name": "林新醫院", "level": "區域醫院", "city": "臺中市", "district": "南屯區", "phone": "04-22586688", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "ljci",               "name": "李綜合醫療社團法人大甲李綜合醫院", "short_name": "大甲李綜合", "level": "區域醫院", "city": "臺中市", "district": "大甲區", "phone": "04-26862288", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
@@ -155,7 +159,7 @@ async def _seed_hospitals():
         {"code": "tcvgh-chiayi",       "name": "臺中榮民總醫院嘉義分院", "short_name": "嘉榮", "level": "區域醫院", "city": "嘉義市", "district": "西區", "phone": "05-2359630", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "cych",               "name": "戴德森醫療財團法人嘉義基督教醫院", "short_name": "嘉基", "level": "區域醫院", "city": "嘉義市", "district": "東區", "phone": "05-2765041", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "stm",                "name": "天主教中華聖母修女會醫療財團法人天主教聖馬爾定醫院及其民權院區", "short_name": "聖馬爾定", "level": "區域醫院", "city": "嘉義市", "district": "東區", "phone": "05-2756000", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
-        {"code": "changgung-chiayi",   "name": "長庚醫療財團法人嘉義長庚紀念醫院", "short_name": "嘉義長庚", "level": "區域醫院", "city": "嘉義縣", "district": "朴子市", "phone": "05-3621000", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
+        {"code": "changgung-chiayi",   "name": "長庚醫療財團法人嘉義長庚紀念醫院", "short_name": "嘉義長庚", "level": "區域醫院", "city": "嘉義縣", "district": "朴子市", "phone": "05-3621000", "url": "https://register.cgmh.org.tw/Progress/6", "adapter_name": "ChangGungAdapter", "is_active": True, "scrape_interval": 60},
         {"code": "tainan-mohw",        "name": "衛生福利部臺南醫院", "short_name": "部南", "level": "區域醫院", "city": "臺南市", "district": "中西區", "phone": "06-2200055", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "tmh",                "name": "台南市立醫院(委託秀傳醫療社團法人經營)", "short_name": "台南市醫", "level": "區域醫院", "city": "臺南市", "district": "東區", "phone": "06-2609926", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
         {"code": "sinlau",             "name": "台灣基督長老教會新樓醫療財團法人台南新樓醫院", "short_name": "新樓醫院", "level": "區域醫院", "city": "臺南市", "district": "東區", "phone": "06-2748316", "url": None, "adapter_name": None, "is_active": False, "scrape_interval": 60},
@@ -266,6 +270,19 @@ async def _seed_hospital_aliases():
         "femh": ["亞東", "亞東醫院"],
         # --- 衛福部臺北醫院 ---
         "tph": ["臺北醫院", "台北醫院", "部北", "衛福部北"],
+        # --- 新增長庚系 ---
+        "changgung-keelung": ["基隆長庚"],
+        "changgung-taoyuan": ["桃園長庚"],
+        "changgung-yunlin": ["雲林長庚"],
+        "changgung-chiayi": ["嘉義長庚"],
+        "changgung-fengshan": ["鳳山長庚"],
+        "changgung-tucheng": ["土城長庚", "土城醫院"],
+        # --- 國泰系 ---
+        "cathay-xizhi": ["汐止國泰"],
+        # --- 衛福部系 ---
+        "fyh-mohw": ["部豐", "豐原醫院"],
+        # --- 輔大 ---
+        "fjuh": ["輔大", "輔大醫院"],
     }
 
     async with async_session() as session:
@@ -298,6 +315,7 @@ app = FastAPI(
 
 # 註冊路由
 app.include_router(webhook_router)
+app.include_router(admin_router)
 
 
 @app.get("/health")

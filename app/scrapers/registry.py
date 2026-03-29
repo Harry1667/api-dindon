@@ -6,17 +6,22 @@ from app.scrapers.base import BaseHospitalAdapter
 from app.scrapers.wanfang import WanfangAdapter
 from app.scrapers.newtaipei_united import banqiao_adapter, sanchong_adapter
 from app.scrapers.kaohsiung_united import KaohsiungUnitedAdapter
-from app.scrapers.changgung import taipei_changgung, linkou_changgung, kaohsiung_changgung
+from app.scrapers.changgung import (
+    keelung_changgung, taipei_changgung, linkou_changgung, taoyuan_changgung,
+    yunlin_changgung, chiayi_changgung, kaohsiung_changgung, fengshan_changgung,
+    tucheng_changgung,
+)
 from app.scrapers.ntuh import ntuh_main, ntuh_children
 from app.scrapers.mackay import mackay_taipei, mackay_tamsui
 from app.scrapers.tpvgh import TpvghAdapter
-from app.scrapers.cathay import CathayAdapter
+from app.scrapers.cathay import CathayAdapter, cathay_xizhi
 from app.scrapers.shinkong import ShinkongAdapter
 from app.scrapers.tsgh import TsghAdapter
 from app.scrapers.chgh import ChghAdapter
 from app.scrapers.tzuchi import tzuchi_taipei, tzuchi_xindian
 from app.scrapers.femh import FemhAdapter
-from app.scrapers.tph import TphAdapter
+from app.scrapers.tph import tph_adapter, fyh_adapter
+from app.scrapers.fjuh import FjuhAdapter
 
 
 class AdapterRegistry:
@@ -42,33 +47,50 @@ class AdapterRegistry:
 
 
 # ============================================================
-# 註冊所有 Adapter
+# 註冊所有 Adapter（共 28 家）
 # ============================================================
 
 # --- 台北市 醫學中心 ---
-AdapterRegistry.register(WanfangAdapter())            # 萬芳醫院（HTML 爬蟲）
-AdapterRegistry.register(ntuh_main)                    # 台大醫院（POST AJAX）
-AdapterRegistry.register(ntuh_children)                # 台大兒童醫院
-AdapterRegistry.register(TpvghAdapter())               # 台北榮總（GET + 科別連結）
-AdapterRegistry.register(taipei_changgung)             # 台北長庚（POST form）
-AdapterRegistry.register(mackay_taipei)                # 馬偕醫院 台北（GET params）
-AdapterRegistry.register(CathayAdapter())              # 國泰醫院
-AdapterRegistry.register(ShinkongAdapter())            # 新光醫院
+AdapterRegistry.register(ntuh_main)                    # 台大醫院
 AdapterRegistry.register(TsghAdapter())                # 三軍總醫院
-AdapterRegistry.register(ChghAdapter())                # 振興醫院
-AdapterRegistry.register(tzuchi_taipei)                # 台北慈濟醫院
-AdapterRegistry.register(tzuchi_xindian)               # 台北慈濟醫院(新店)
-AdapterRegistry.register(FemhAdapter())                # 亞東紀念醫院
-AdapterRegistry.register(TphAdapter())                 # 衛福部臺北醫院
+AdapterRegistry.register(TpvghAdapter())               # 台北榮總
+AdapterRegistry.register(taipei_changgung)             # 台北長庚
+AdapterRegistry.register(CathayAdapter())              # 國泰醫院
+AdapterRegistry.register(mackay_taipei)                # 馬偕醫院 台北
+AdapterRegistry.register(ShinkongAdapter())            # 新光醫院
+AdapterRegistry.register(WanfangAdapter())             # 萬芳醫院
 
 # --- 台北市 區域醫院 ---
-AdapterRegistry.register(mackay_tamsui)                # 馬偕醫院 淡水
+AdapterRegistry.register(ntuh_children)                # 台大兒童醫院
+AdapterRegistry.register(ChghAdapter())                # 振興醫院
 
-# --- 新北市 — 政府開放資料 JSON API ---
+# --- 新北市 ---
+AdapterRegistry.register(FemhAdapter())                # 亞東醫院
+AdapterRegistry.register(tzuchi_taipei)                # 台北慈濟醫院
+AdapterRegistry.register(tzuchi_xindian)               # 台北慈濟(新店)
+AdapterRegistry.register(mackay_tamsui)                # 馬偕醫院 淡水
+AdapterRegistry.register(tph_adapter)                  # 衛福部臺北醫院
+AdapterRegistry.register(cathay_xizhi)                 # 汐止國泰
+AdapterRegistry.register(tucheng_changgung)            # 土城長庚
 AdapterRegistry.register(banqiao_adapter)              # 新北聯合醫院 板橋
 AdapterRegistry.register(sanchong_adapter)             # 新北聯合醫院 三重
+AdapterRegistry.register(FjuhAdapter())                # 輔大醫院
 
-# --- 外縣市 ---
+# --- 基隆 ---
+AdapterRegistry.register(keelung_changgung)            # 基隆長庚
+
+# --- 桃園 ---
 AdapterRegistry.register(linkou_changgung)             # 林口長庚
+AdapterRegistry.register(taoyuan_changgung)            # 桃園長庚
+
+# --- 台中 ---
+AdapterRegistry.register(fyh_adapter)                  # 衛福部豐原醫院
+
+# --- 雲嘉 ---
+AdapterRegistry.register(yunlin_changgung)             # 雲林長庚
+AdapterRegistry.register(chiayi_changgung)             # 嘉義長庚
+
+# --- 高雄 ---
 AdapterRegistry.register(kaohsiung_changgung)          # 高雄長庚
-AdapterRegistry.register(KaohsiungUnitedAdapter())     # 高雄聯合醫院（JSON API）
+AdapterRegistry.register(fengshan_changgung)           # 鳳山長庚
+AdapterRegistry.register(KaohsiungUnitedAdapter())     # 高雄聯合醫院

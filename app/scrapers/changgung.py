@@ -170,6 +170,14 @@ class ChangGungAdapter(BaseHospitalAdapter):
 
 
 # === 預建院區 Adapter ===
+# 代碼對照：1=台北, 2=基隆, 3=林口, 5=桃園, 6=嘉義, 8=高雄,
+#          B=長庚診所, E=情人湖(基隆), M=雲林, T=鳳山, V=土城
+keelung_changgung = ChangGungAdapter("changgung-keelung", "基隆長庚", "2")
 taipei_changgung = ChangGungAdapter("changgung-taipei", "台北長庚", "1")
 linkou_changgung = ChangGungAdapter("changgung-linkou", "林口長庚", "3")
+taoyuan_changgung = ChangGungAdapter("changgung-taoyuan", "桃園長庚", "5")
+yunlin_changgung = ChangGungAdapter("changgung-yunlin", "雲林長庚", "M")
+chiayi_changgung = ChangGungAdapter("changgung-chiayi", "嘉義長庚", "6")
 kaohsiung_changgung = ChangGungAdapter("changgung-kaohsiung", "高雄長庚", "8")
+fengshan_changgung = ChangGungAdapter("changgung-fengshan", "鳳山長庚", "T")
+tucheng_changgung = ChangGungAdapter("changgung-tucheng", "土城長庚", "V")
