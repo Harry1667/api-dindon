@@ -19,6 +19,10 @@ from app.scrapers.tpvgh import TpvghAdapter
 from app.scrapers.cathay import CathayAdapter
 from app.scrapers.shinkong import ShinkongAdapter
 from app.scrapers.tsgh import TsghAdapter
+from app.scrapers.chgh import ChghAdapter
+from app.scrapers.tzuchi import tzuchi_taipei, tzuchi_xindian
+from app.scrapers.femh import FemhAdapter
+from app.scrapers.tph import TphAdapter
 
 TW_TZ = timezone(timedelta(hours=8))
 
@@ -36,6 +40,11 @@ ALL_ADAPTERS = [
     CathayAdapter(),
     ShinkongAdapter(),
     TsghAdapter(),
+    ChghAdapter(),
+    tzuchi_taipei,
+    tzuchi_xindian,
+    FemhAdapter(),
+    TphAdapter(),
     banqiao_adapter,
     sanchong_adapter,
     KaohsiungUnitedAdapter(),

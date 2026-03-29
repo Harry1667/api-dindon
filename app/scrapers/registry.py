@@ -13,6 +13,10 @@ from app.scrapers.tpvgh import TpvghAdapter
 from app.scrapers.cathay import CathayAdapter
 from app.scrapers.shinkong import ShinkongAdapter
 from app.scrapers.tsgh import TsghAdapter
+from app.scrapers.chgh import ChghAdapter
+from app.scrapers.tzuchi import tzuchi_taipei, tzuchi_xindian
+from app.scrapers.femh import FemhAdapter
+from app.scrapers.tph import TphAdapter
 
 
 class AdapterRegistry:
@@ -51,6 +55,11 @@ AdapterRegistry.register(mackay_taipei)                # 馬偕醫院 台北（G
 AdapterRegistry.register(CathayAdapter())              # 國泰醫院
 AdapterRegistry.register(ShinkongAdapter())            # 新光醫院
 AdapterRegistry.register(TsghAdapter())                # 三軍總醫院
+AdapterRegistry.register(ChghAdapter())                # 振興醫院
+AdapterRegistry.register(tzuchi_taipei)                # 台北慈濟醫院
+AdapterRegistry.register(tzuchi_xindian)               # 台北慈濟醫院(新店)
+AdapterRegistry.register(FemhAdapter())                # 亞東紀念醫院
+AdapterRegistry.register(TphAdapter())                 # 衛福部臺北醫院
 
 # --- 台北市 區域醫院 ---
 AdapterRegistry.register(mackay_tamsui)                # 馬偕醫院 淡水
