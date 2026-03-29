@@ -1,1 +1,4 @@
 claude --dangerously-skip-permissions
+
+git remote set-url origin https://david@git.twloop.com/david/arkmesa-web-aiaeoscan.git
+改HTTPS
