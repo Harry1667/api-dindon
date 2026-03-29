@@ -228,80 +228,139 @@ async def _seed_hospital_aliases():
     from app.models.hospital_alias import HospitalAlias
 
     # hospital_code → [別名列表]
-    # 規則：正式名稱本身不需要加（已在 hospitals.name），這裡只放簡稱/俗稱/常見寫法
+    # 別名可重複：例如「長庚」同時指向多家長庚，LINE 查詢時會列出所有匹配的醫院
+    # 規則：short_name 不需要加（resolver 會自動從 hospitals.short_name 載入）
     alias_map = {
-        # --- 萬芳醫院 ---
-        "wanfang": ["萬芳", "wanfang"],
-        # --- 台大醫院 ---
-        "ntuh": ["台大", "臺大", "臺大醫院", "台大總院", "ntuh"],
-        # --- 台大兒童醫院 ---
-        "ntuh-children": ["台大兒童", "臺大兒童", "台大兒醫"],
-        # --- 台北榮總 ---
-        "tpvgh": ["北榮", "台北榮總", "臺北榮總", "榮總", "tpvgh"],
-        # --- 台北長庚 ---
-        "changgung-taipei": ["台北長庚", "北長庚"],
-        # --- 林口長庚 ---
-        "changgung-linkou": ["林口長庚", "林口"],
-        # --- 高雄長庚 ---
-        "changgung-kaohsiung": ["高雄長庚", "高長庚"],
-        # --- 馬偕醫院（台北）---
-        "mackay-taipei": ["馬偕", "台北馬偕", "馬偕台北", "臺北馬偕"],
-        # --- 馬偕醫院（淡水）---
-        "mackay-tamsui": ["淡水馬偕", "馬偕淡水"],
-        # --- 國泰醫院 ---
-        "cathay": ["國泰", "cathay"],
-        # --- 新光醫院 ---
-        "shinkong": ["新光", "shinkong"],
-        # --- 三軍總醫院 ---
-        "tsgh": ["三總", "三軍", "三軍總", "tsgh"],
-        # --- 新北聯合醫院（板橋）---
-        "newtaipei-banqiao": ["板橋聯醫", "板橋", "新北板橋", "聯醫板橋"],
-        # --- 新北聯合醫院（三重）---
-        "newtaipei-sanchong": ["三重聯醫", "三重", "新北三重", "聯醫三重"],
-        # --- 高雄聯合醫院 ---
-        "kaohsiung-united": ["高雄聯醫", "高聯醫"],
-        # --- 振興醫院 ---
-        "chgh": ["振興", "振興醫院"],
-        # --- 台北慈濟醫院 ---
-        "tzuchi-taipei": ["慈濟", "台北慈濟", "慈濟台北"],
-        # --- 台北慈濟醫院（新店）---
-        "tzuchi-xindian": ["慈濟新店", "新店慈濟"],
-        # --- 亞東紀念醫院 ---
-        "femh": ["亞東", "亞東醫院"],
-        # --- 衛福部臺北醫院 ---
-        "tph": ["臺北醫院", "台北醫院", "部北", "衛福部北"],
-        # --- 新增長庚系 ---
-        "changgung-keelung": ["基隆長庚"],
-        "changgung-taoyuan": ["桃園長庚"],
-        "changgung-yunlin": ["雲林長庚"],
-        "changgung-chiayi": ["嘉義長庚"],
-        "changgung-fengshan": ["鳳山長庚"],
-        "changgung-tucheng": ["土城長庚", "土城醫院"],
-        # --- 國泰系 ---
-        "cathay-xizhi": ["汐止國泰"],
-        # --- 衛福部系 ---
-        "fyh-mohw": ["部豐", "豐原醫院"],
-        # --- 輔大 ---
-        "fjuh": ["輔大", "輔大醫院"],
+        # ===== 台大系 =====（「台大」共用）
+        "ntuh":                ["台大", "臺大", "臺大醫院", "台大醫院", "台大總院", "台大本院"],
+        "ntuh-children":       ["台大", "台大兒童", "臺大兒童", "台大兒醫", "台大兒童醫院"],
+        "ntuh-cancer":         ["台大", "台大癌醫", "臺大癌醫", "癌醫中心"],
+        # ===== 榮總系 =====（「榮總」共用）
+        "tpvgh":               ["榮總", "北榮", "台北榮總", "臺北榮總", "台北榮民"],
+        # ===== 三總系 =====（「三總」共用）
+        "tsgh":                ["三總", "三軍", "三軍總", "三軍總醫院", "內湖三總"],
+        "tsgh-songshan":       ["三總", "三總松山", "松山三總", "松山分院"],
+        # ===== 長庚系 =====（「長庚」共用）
+        "changgung-taipei":    ["長庚", "台北長庚", "北長庚", "台北長庚醫院"],
+        "changgung-linkou":    ["長庚", "林口長庚", "林口", "長庚總院", "長庚醫院"],
+        "changgung-keelung":   ["長庚", "基隆長庚", "基隆長庚醫院"],
+        "changgung-taoyuan":   ["長庚", "桃園長庚", "桃園長庚醫院"],
+        "changgung-yunlin":    ["長庚", "雲林長庚", "麥寮長庚"],
+        "changgung-chiayi":    ["長庚", "嘉義長庚", "嘉義長庚醫院"],
+        "changgung-kaohsiung": ["長庚", "高雄長庚", "高長庚", "高雄長庚醫院"],
+        "changgung-fengshan":  ["長庚", "鳳山長庚", "鳳山醫院"],
+        "changgung-tucheng":   ["長庚", "土城長庚", "土城醫院"],
+        # ===== 馬偕系 =====（「馬偕」共用）
+        "mackay-taipei":       ["馬偕", "台北馬偕", "馬偕台北", "臺北馬偕", "馬偕醫院", "馬偕總院"],
+        "mackay-tamsui":       ["馬偕", "淡水馬偕", "馬偕淡水"],
+        # ===== 國泰系 =====（「國泰」共用）
+        "cathay":              ["國泰", "國泰總院", "台北國泰", "國泰醫院", "國泰綜合"],
+        "cathay-xizhi":        ["國泰", "汐止國泰", "國泰汐止"],
+        # ===== 慈濟系 =====（「慈濟」共用）
+        "tzuchi-taipei":       ["慈濟", "台北慈濟", "慈濟台北", "新店慈濟", "慈濟醫院"],
+        "tzuchi-xindian":      ["慈濟", "慈濟新店"],
+        # ===== 萬芳 =====
+        "wanfang":             ["萬芳", "萬芳醫院"],
+        # ===== 新光 =====
+        "shinkong":            ["新光", "新光醫院", "新光吳火獅"],
+        # ===== 振興 =====
+        "chgh":                ["振興", "振興醫院"],
+        # ===== 北醫系 =====（「北醫」共用）
+        "tmuh":                ["北醫", "北醫附醫", "臺北醫學", "北醫附設"],
+        "shuangho":            ["北醫", "雙和", "雙和醫院"],
+        # ===== 亞東 =====
+        "femh":                ["亞東", "亞東醫院", "亞東紀念", "板橋亞東"],
+        # ===== 衛福部系 =====（「部立」共用概念）
+        "tph":                 ["部立", "部北", "臺北醫院", "台北醫院", "衛福部北", "衛福部臺北"],
+        "fyh-mohw":            ["部立", "部豐", "豐原醫院", "衛福部豐原"],
+        "keelung-mohw":        ["部立", "部基", "基隆醫院", "衛福部基隆"],
+        "tygh-mohw":           ["部立", "部桃", "桃園醫院", "衛福部桃園"],
+        "miaoli-mohw":         ["部立", "部苗", "苗栗醫院", "衛福部苗栗"],
+        "taichung-mohw":       ["部立", "部中", "臺中醫院", "衛福部臺中"],
+        "changhua-mohw":       ["部立", "部彰", "彰化醫院", "衛福部彰化"],
+        "nantou-mohw":         ["部立", "部投", "南投醫院", "衛福部南投"],
+        "tainan-mohw":         ["部立", "部南", "臺南醫院", "衛福部臺南"],
+        "pingtung-mohw":       ["部立", "部屏", "屏東醫院", "衛福部屏東"],
+        # ===== 新北聯醫 =====（「新北聯醫」「聯醫」共用）
+        "newtaipei-banqiao":   ["新北聯醫", "聯醫", "板橋聯醫", "聯醫板橋", "板橋醫院"],
+        "newtaipei-sanchong":  ["新北聯醫", "聯醫", "三重聯醫", "聯醫三重", "三重醫院"],
+        # ===== 高雄聯醫 =====
+        "kaohsiung-united":    ["高雄聯醫", "高聯醫", "高雄聯合", "高雄市聯合"],
+        # ===== 輔大 =====
+        "fjuh":                ["輔大", "輔大醫院", "輔仁", "輔仁醫院"],
+        # ===== 台中系 =====
+        "tcvgh":               ["台中榮總", "臺中榮總", "中榮"],
+        "csh":                 ["中山醫", "中山附醫", "中山醫大"],
+        "cmuh":                ["中國醫", "中國附醫", "中國醫藥"],
+        # ===== 彰化 =====
+        "cch":                 ["彰基", "彰化基督教", "彰基醫院"],
+        # ===== 台南系 =====
+        "nckuh":               ["成大", "成大醫院", "成功大學附醫"],
+        "chimei":              ["奇美", "奇美醫院", "永康奇美"],
+        # ===== 高雄系 =====
+        "ksvgh":               ["高榮", "高雄榮總", "高雄榮民"],
+        "kmuh":                ["高醫", "高醫附醫", "高雄醫學"],
+        "edah":                ["義大", "義大醫院"],
+        # ===== 嘉義系 =====
+        "cych":                ["嘉基", "嘉義基督教"],
+        "stm":                 ["聖馬", "聖馬爾定"],
+        "tcvgh-chiayi":        ["嘉榮", "嘉義榮總", "臺中榮總嘉義"],
+        # ===== 花東系 =====
+        "tzuchi-hualien":      ["慈濟", "花蓮慈濟", "慈濟花蓮"],
+        "tzuchi-dalin":        ["慈濟", "大林慈濟", "慈濟大林"],
+        "mackay-taitung":      ["馬偕", "台東馬偕", "馬偕台東"],
+        "mch":                 ["門諾", "門諾醫院", "花蓮門諾"],
+        # ===== 宜蘭系 =====
+        "ymuh":                ["陽交大", "陽明交大", "宜蘭陽明"],
+        "pohai":               ["博愛", "羅東博愛", "博愛醫院"],
+        "smh":                 ["聖母", "羅東聖母", "聖母醫院"],
+        # ===== 新北其他 =====
+        "eck":                 ["恩主公", "恩主公醫院", "三峽恩主公"],
+        "cth":                 ["耕莘", "耕莘醫院", "新店耕莘"],
+        "changgung-tucheng":   ["土城長庚", "土城醫院"],
+        # ===== 桃園其他 =====
+        "aftygh":              ["國軍桃園", "桃園國軍"],
+        "tpvgh-taoyuan":       ["北榮桃園", "桃園榮民"],
+        "sph":                 ["聖保祿", "聖保祿醫院"],
+        "landseed":            ["聯新", "聯新醫院", "壢新"],
+        # ===== 新竹 =====
+        "ntuh-hsinchu":        ["新竹台大", "新竹臺大"],
+        "mackay-hsinchu":      ["馬偕", "新竹馬偕", "馬偕新竹"],
+        "tyh":                 ["東元", "東元醫院"],
+        # ===== 苗栗 =====
+        "weigong":             ["為恭", "為恭醫院"],
+        # ===== 台中其他 =====
+        "ktgh":                ["光田", "光田醫院"],
+        "sltung":              ["童綜合", "童醫院"],
+        "lshosp":              ["林新", "林新醫院"],
+        "tzuchi-taichung":     ["慈濟", "台中慈濟", "慈濟台中"],
+        "jah":                 ["仁愛", "大里仁愛", "仁愛醫院"],
+        "ndmctsgh-tc":         ["國軍台中", "台中國軍"],
+        # ===== 雲林 =====
+        "ntuh-yunlin":         ["台大雲林", "臺大雲林", "雲林台大"],
+        "cmuh-beigang":        ["北港", "中醫北港", "北港附醫"],
+        # ===== 軍醫系 =====
+        "afkh-zuoying":        ["國軍左營", "左營國軍", "海軍醫院"],
+        "afkh":                ["國軍高雄", "高雄國軍"],
+        "afhl":                ["國軍花蓮", "花蓮國軍"],
     }
 
     async with async_session() as session:
         for hospital_code, aliases in alias_map.items():
             for alias in aliases:
+                # 檢查是否已有 (hospital_code, alias) 這組配對
                 result = await session.execute(
-                    select(HospitalAlias).where(HospitalAlias.alias == alias)
+                    select(HospitalAlias).where(
+                        HospitalAlias.hospital_code == hospital_code,
+                        HospitalAlias.alias == alias,
+                    )
                 )
-                existing = result.scalar_one_or_none()
-                if not existing:
+                if not result.scalar_one_or_none():
                     session.add(HospitalAlias(
                         hospital_code=hospital_code,
                         alias=alias,
                     ))
                     logger.debug(f"已新增別名: {alias} → {hospital_code}")
-                elif existing.hospital_code != hospital_code:
-                    # 別名指向的醫院變了，更新它
-                    existing.hospital_code = hospital_code
-                    logger.info(f"已更新別名: {alias} → {hospital_code}")
         await session.commit()
     logger.info("✅ 醫院別名初始化完成")
 

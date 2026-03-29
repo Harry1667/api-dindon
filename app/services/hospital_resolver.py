@@ -1,16 +1,19 @@
 """醫院別名解析器 — 根據使用者輸入的文字找到對應的醫院
 
+別名可重複：例如「三總」同時對應三軍總醫院和三總松山分院時，
+resolve() 回傳第一個匹配，resolve_all() 回傳所有匹配。
+
 使用方式：
-    from app.services.hospital_resolver import HospitalResolver
-
     resolver = HospitalResolver()
-    await resolver.load()           # 啟動時載入一次
+    await resolver.load()
 
-    result = resolver.resolve("三總")
-    # → {"code": "tsgh", "name": "三軍總醫院", "matched_by": "alias", "matched_text": "三總"}
+    # 單一結果
+    result = resolver.resolve("萬芳 精神科")
+    # → ResolveResult(code="wanfang", name="萬芳醫院", extra="精神科")
 
-    result = resolver.resolve("台大 內科")
-    # → {"code": "ntuh", "name": "台大醫院", "matched_by": "alias", "matched_text": "台大", "extra": "內科"}
+    # 多重結果（別名重複時）
+    results = resolver.resolve_all("三總")
+    # → [ResolveResult(code="tsgh", ...), ResolveResult(code="tsgh-songshan", ...)]
 """
 
 import logging
@@ -23,7 +26,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ResolveResult:
     code: str           # hospital_code
-    name: str           # 醫院正式名稱
+    name: str           # 醫院簡稱 (short_name)
     matched_by: str     # "name" | "alias"
     matched_text: str   # 實際匹配到的文字
     extra: str = ""     # 剩餘文字（科別/醫師等）
@@ -33,9 +36,9 @@ class HospitalResolver:
     """快取在記憶體的醫院別名對照表，啟動時載入一次"""
 
     def __init__(self):
-        # alias_text → (hospital_code, hospital_name)
-        self._alias_map: dict[str, tuple[str, str]] = {}
-        # hospital_code → hospital_name
+        # alias_text → [(hospital_code, hospital_short_name), ...]
+        self._alias_map: dict[str, list[tuple[str, str]]] = {}
+        # hospital_code → hospital_short_name
         self._code_to_name: dict[str, str] = {}
         self._loaded = False
 
@@ -45,77 +48,91 @@ class HospitalResolver:
         from app.models.hospital import Hospital
         from app.models.hospital_alias import HospitalAlias
 
+        self._alias_map.clear()
+        self._code_to_name.clear()
+
         async with async_session() as session:
-            # 載入所有醫院
+            # 載入所有啟用的醫院
             result = await session.execute(select(Hospital).where(Hospital.is_active == True))
             hospitals = result.scalars().all()
             for h in hospitals:
-                self._code_to_name[h.code] = h.name
-                # 正式名稱也可以匹配
-                self._alias_map[h.name] = (h.code, h.name)
+                self._code_to_name[h.code] = h.short_name
+                # 簡稱也可匹配
+                self._alias_map.setdefault(h.short_name, []).append((h.code, h.short_name))
 
-            # 載入所有別名
+            # 載入所有別名（允許重複 alias 指向不同醫院）
             result = await session.execute(select(HospitalAlias))
             aliases = result.scalars().all()
             for a in aliases:
-                hosp_name = self._code_to_name.get(a.hospital_code, a.hospital_code)
-                self._alias_map[a.alias] = (a.hospital_code, hosp_name)
+                short = self._code_to_name.get(a.hospital_code)
+                if short is None:
+                    continue  # 該醫院未啟用，跳過
+                self._alias_map.setdefault(a.alias, []).append((a.hospital_code, short))
+
+        # 去重（同一個 alias 不會有兩筆指向同一個 code）
+        for key in self._alias_map:
+            self._alias_map[key] = list(dict.fromkeys(self._alias_map[key]))
 
         self._loaded = True
+        total_entries = sum(len(v) for v in self._alias_map.values())
         logger.info(
-            f"✅ HospitalResolver 載入完成: "
-            f"{len(self._code_to_name)} 間醫院, {len(self._alias_map)} 個別名/名稱"
+            f"HospitalResolver 載入完成: "
+            f"{len(self._code_to_name)} 間醫院, {len(self._alias_map)} 個別名, "
+            f"{total_entries} 筆對應"
         )
 
     def resolve(self, user_input: str) -> ResolveResult | None:
-        """
-        從使用者輸入中找出醫院。
+        """找到第一個匹配的醫院（向後相容）"""
+        results = self.resolve_all(user_input)
+        return results[0] if results else None
 
-        嘗試策略（由長到短匹配，避免「台大」吃掉「台大兒童」）：
-        1. 完整匹配整段文字
-        2. 從最長的別名開始，檢查是否出現在文字中
-        """
+    def resolve_all(self, user_input: str) -> list[ResolveResult]:
+        """找出所有匹配的醫院（別名重複時回傳多個）"""
         if not self._loaded:
             logger.warning("HospitalResolver 尚未載入，請先呼叫 load()")
-            return None
+            return []
 
         text = user_input.strip()
         if not text:
-            return None
+            return []
 
-        # 完整匹配
+        # 1. 完整匹配
         if text in self._alias_map:
-            code, name = self._alias_map[text]
-            return ResolveResult(
-                code=code, name=name,
-                matched_by="alias" if text != name else "name",
-                matched_text=text,
-            )
+            entries = self._alias_map[text]
+            return [
+                ResolveResult(
+                    code=code, name=name,
+                    matched_by="alias",
+                    matched_text=text,
+                )
+                for code, name in entries
+            ]
 
-        # 子字串匹配 — 按別名長度降序，優先匹配較長的別名
+        # 2. 子字串匹配 — 按別名長度降序，優先匹配較長的
         sorted_aliases = sorted(self._alias_map.keys(), key=len, reverse=True)
         for alias in sorted_aliases:
             if alias in text:
-                code, name = self._alias_map[alias]
+                entries = self._alias_map[alias]
                 extra = text.replace(alias, "", 1).strip()
-                return ResolveResult(
-                    code=code, name=name,
-                    matched_by="alias" if alias != name else "name",
-                    matched_text=alias,
-                    extra=extra,
-                )
+                return [
+                    ResolveResult(
+                        code=code, name=name,
+                        matched_by="alias",
+                        matched_text=alias,
+                        extra=extra,
+                    )
+                    for code, name in entries
+                ]
 
-        return None
+        return []
 
     def get_name(self, hospital_code: str) -> str:
-        """根據 code 取得醫院名稱"""
         return self._code_to_name.get(hospital_code, hospital_code)
 
     def list_aliases(self, hospital_code: str) -> list[str]:
-        """列出某醫院的所有別名"""
         return [
-            alias for alias, (code, _) in self._alias_map.items()
-            if code == hospital_code
+            alias for alias, entries in self._alias_map.items()
+            if any(code == hospital_code for code, _ in entries)
         ]
 
 

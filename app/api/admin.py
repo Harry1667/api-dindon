@@ -1,6 +1,9 @@
 """後台管理路由 — 登入彈框 + 統計 + 醫院管理"""
 
 import secrets
+from datetime import datetime, timedelta, timezone
+
+import jwt
 from fastapi import APIRouter, Request, Cookie
 from fastapi.responses import HTMLResponse, JSONResponse
 
@@ -8,11 +11,28 @@ from app.config import settings
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-_active_tokens: set[str] = set()
+import hashlib
+JWT_SECRET = hashlib.sha256(settings.admin_password.encode()).hexdigest()
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRE_HOURS = 24
+
+
+def _make_token() -> str:
+    payload = {
+        "sub": settings.admin_username,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRE_HOURS),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
 def _check_auth(token: str | None) -> bool:
-    return token is not None and token in _active_tokens
+    if not token:
+        return False
+    try:
+        jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return True
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return False
 
 
 # ============================================================
@@ -26,17 +46,16 @@ async def api_login(request: Request):
     password = body.get("password", "")
     if (secrets.compare_digest(username, settings.admin_username)
             and secrets.compare_digest(password, settings.admin_password)):
-        token = secrets.token_urlsafe(32)
-        _active_tokens.add(token)
+        token = _make_token()
         resp = JSONResponse({"ok": True})
-        resp.set_cookie("admin_token", token, httponly=True, samesite="strict", max_age=86400)
+        resp.set_cookie("admin_token", token, httponly=True, samesite="strict",
+                         max_age=JWT_EXPIRE_HOURS * 3600)
         return resp
     return JSONResponse({"ok": False, "error": "帳號或密碼錯誤"}, status_code=401)
 
 
 @router.post("/api/logout")
-async def api_logout(admin_token: str | None = Cookie(None)):
-    _active_tokens.discard(admin_token)
+async def api_logout():
     resp = JSONResponse({"ok": True})
     resp.delete_cookie("admin_token")
     return resp
@@ -87,15 +106,28 @@ async def api_hospitals(admin_token: str | None = Cookie(None)):
     from app.models.hospital import Hospital
     from app.models.hospital_alias import HospitalAlias
 
+    CITY_ORDER = ['臺北市','新北市','桃園市','基隆市','臺中市','高雄市','臺南市','宜蘭縣']
+
     async with async_session() as session:
-        result = await session.execute(
-            select(Hospital).order_by(Hospital.level, Hospital.city, Hospital.id)
-        )
+        result = await session.execute(select(Hospital))
         hospitals = result.scalars().all()
 
         # 取所有別名
         alias_result = await session.execute(select(HospitalAlias))
         all_aliases = alias_result.scalars().all()
+
+    def city_rank(c):
+        try:
+            return CITY_ORDER.index(c)
+        except ValueError:
+            return 100
+
+    hospitals.sort(key=lambda h: (
+        0 if h.level == '醫學中心' else 1,
+        city_rank(h.city),
+        h.city,
+        h.id,
+    ))
 
     # 按 hospital_code 分組
     alias_map: dict[str, list[str]] = {}
@@ -155,31 +187,34 @@ async def update_hospital_aliases(code: str, request: Request, admin_token: str 
             delete(HospitalAlias).where(HospitalAlias.hospital_code == code)
         )
 
-        # 寫入新別名
+        # 寫入新別名（允許重複，同一個 alias 可對應多家醫院）
         added = []
-        skipped = []
         for alias in new_aliases:
-            # 檢查別名是否已被其他醫院佔用
-            existing = await session.execute(
+            session.add(HospitalAlias(hospital_code=code, alias=alias))
+            added.append(alias)
+
+        await session.commit()
+
+    # 找出哪些別名有其他醫院也在用（提示用）
+    shared = []
+    async with async_session() as session:
+        for alias in added:
+            result = await session.execute(
                 select(HospitalAlias).where(
                     HospitalAlias.alias == alias,
                     HospitalAlias.hospital_code != code,
                 )
             )
-            if existing.scalar_one_or_none():
-                skipped.append(alias)
-                continue
-            session.add(HospitalAlias(hospital_code=code, alias=alias))
-            added.append(alias)
-
-        await session.commit()
+            others = result.scalars().all()
+            if others:
+                shared.append(f"{alias}({len(others)+1}家共用)")
 
     return {
         "ok": True,
         "code": code,
         "short_name": new_short_name or hospital.short_name,
         "aliases_added": added,
-        "aliases_skipped": skipped,
+        "aliases_shared": shared,
     }
 
 
@@ -259,8 +294,13 @@ td.clickable:hover { color:#4a90d9; text-decoration:underline; }
 .badge-blue { background:#e8f0fe; color:#2979ff; }
 .alias-list { font-size:11px; color:#888; }
 
-.search-bar { margin-bottom:16px; }
-.search-bar input { width:100%; max-width:400px; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:14px; }
+.filter-bar { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; align-items:center; }
+.filter-bar input { flex:1; min-width:180px; max-width:300px; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:14px; }
+.filter-bar select { padding:8px 10px; border:1px solid #ddd; border-radius:6px; font-size:13px; background:#fff; }
+.filter-count { font-size:13px; color:#888; }
+th.sortable { cursor:pointer; user-select:none; }
+th.sortable:hover { background:#f0f4ff; }
+th.sortable span { font-size:10px; }
 
 @media(max-width:600px) {
   .stat-grid { grid-template-columns:repeat(2,1fr); }
@@ -317,15 +357,32 @@ td.clickable:hover { color:#4a90d9; text-decoration:underline; }
 
 <!-- 醫院頁 -->
 <div class="container hidden" id="pageHospitals">
-  <div class="search-bar">
-    <input type="text" id="hospitalSearch" placeholder="搜尋醫院名稱、代碼、縣市、別名..." oninput="filterHospitals()">
+  <div class="filter-bar">
+    <input type="text" id="hospitalSearch" placeholder="搜尋名稱、代碼、別名..." oninput="applyFilters()">
+    <select id="filterCity" onchange="applyFilters()"><option value="">全部縣市</option></select>
+    <select id="filterDistrict" onchange="applyFilters()"><option value="">全部區</option></select>
+    <select id="filterLevel" onchange="applyFilters()">
+      <option value="">全部層級</option><option value="醫學中心">醫學中心</option><option value="區域醫院">區域醫院</option>
+    </select>
+    <select id="filterStatus" onchange="applyFilters()">
+      <option value="">全部狀態</option><option value="active">已啟用</option><option value="inactive">未啟用</option>
+    </select>
+    <span id="filterCount" class="filter-count"></span>
   </div>
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
-          <th>#</th><th>code</th><th>簡稱 / 別名</th><th>層級</th><th>縣市</th><th>區</th>
-          <th>健保代碼</th><th>Adapter</th><th>狀態</th><th>電話</th>
+          <th>#</th>
+          <th class="sortable" onclick="sortBy('code')">code <span id="sort_code"></span></th>
+          <th>簡稱 / 別名</th>
+          <th class="sortable" onclick="sortBy('level')">層級 <span id="sort_level"></span></th>
+          <th class="sortable" onclick="sortBy('city')">縣市 <span id="sort_city"></span></th>
+          <th class="sortable" onclick="sortBy('district')">區 <span id="sort_district"></span></th>
+          <th>健保代碼</th>
+          <th class="sortable" onclick="sortBy('adapter')">Adapter <span id="sort_adapter"></span></th>
+          <th class="sortable" onclick="sortBy('status')">狀態 <span id="sort_status"></span></th>
+          <th>電話</th>
         </tr>
       </thead>
       <tbody id="hospitalBody"></tbody>
@@ -400,13 +457,112 @@ async function loadStats() {
 }
 
 // ===== 醫院 =====
+let sortKey = '';
+let sortAsc = true;
+let filteredHospitals = [];
+
 async function loadHospitals() {
   try {
     const r = await fetch('/admin/api/hospitals');
     if (r.status === 401) { location.reload(); return; }
     allHospitals = await r.json();
-    renderHospitals(allHospitals);
+    buildFilterOptions();
+    applyFilters();
   } catch(e) {}
+}
+
+function buildFilterOptions() {
+  const cities = [...new Set(allHospitals.map(h => h.city))];
+  cities.sort((a, b) => {
+    const ra = cityRank(a), rb = cityRank(b);
+    if (ra !== rb) return ra - rb;
+    return a.localeCompare(b, 'zh-Hant-TW');
+  });
+  const cityEl = document.getElementById('filterCity');
+  cityEl.innerHTML = '<option value="">全部縣市</option>' +
+    cities.map(c => `<option value="${c}">${c}</option>`).join('');
+}
+
+function updateDistrictOptions() {
+  const city = document.getElementById('filterCity').value;
+  const distEl = document.getElementById('filterDistrict');
+  if (!city) {
+    distEl.innerHTML = '<option value="">全部區</option>';
+    return;
+  }
+  const districts = [...new Set(allHospitals.filter(h => h.city === city).map(h => h.district))].sort();
+  distEl.innerHTML = '<option value="">全部區</option>' +
+    districts.map(d => `<option value="${d}">${d}</option>`).join('');
+}
+
+document.getElementById('filterCity').addEventListener('change', () => {
+  updateDistrictOptions();
+  applyFilters();
+});
+
+function applyFilters() {
+  const q = document.getElementById('hospitalSearch').value.toLowerCase();
+  const city = document.getElementById('filterCity').value;
+  const district = document.getElementById('filterDistrict').value;
+  const level = document.getElementById('filterLevel').value;
+  const status = document.getElementById('filterStatus').value;
+
+  filteredHospitals = allHospitals.filter(h => {
+    if (q && !(h.code + h.name + h.short_name + h.city + h.district + (h.adapter_name||'') + h.aliases.join(' ')).toLowerCase().includes(q)) return false;
+    if (city && h.city !== city) return false;
+    if (district && h.district !== district) return false;
+    if (level && h.level !== level) return false;
+    if (status === 'active' && !h.is_active) return false;
+    if (status === 'inactive' && h.is_active) return false;
+    return true;
+  });
+
+  if (sortKey) doSort();
+  renderHospitals(filteredHospitals);
+  document.getElementById('filterCount').textContent = `${filteredHospitals.length} / ${allHospitals.length}`;
+}
+
+function sortBy(key) {
+  if (sortKey === key) {
+    sortAsc = !sortAsc;
+  } else {
+    sortKey = key;
+    sortAsc = true;
+  }
+  // 更新箭頭
+  for (const el of document.querySelectorAll('th.sortable span')) el.textContent = '';
+  const arrow = sortAsc ? '▲' : '▼';
+  const spanEl = document.getElementById('sort_' + key);
+  if (spanEl) spanEl.textContent = arrow;
+
+  doSort();
+  renderHospitals(filteredHospitals);
+}
+
+const CITY_ORDER = ['臺北市','新北市','桃園市','基隆市','臺中市','高雄市','臺南市','宜蘭縣'];
+function cityRank(c) { const i = CITY_ORDER.indexOf(c); return i >= 0 ? i : 100; }
+
+function doSort() {
+  const cmp = (a, b) => {
+    let va, vb;
+    switch (sortKey) {
+      case 'code': va = a.code; vb = b.code; break;
+      case 'level': va = a.level === '醫學中心' ? '0' : '1'; vb = b.level === '醫學中心' ? '0' : '1'; break;
+      case 'city': {
+        const ra = cityRank(a.city), rb = cityRank(b.city);
+        if (ra !== rb) return sortAsc ? ra - rb : rb - ra;
+        va = a.city; vb = b.city; break;
+      }
+      case 'district': va = a.district; vb = b.district; break;
+      case 'adapter': va = a.adapter_name || 'zzz'; vb = b.adapter_name || 'zzz'; break;
+      case 'status': va = a.is_active ? '0' : '1'; vb = b.is_active ? '0' : '1'; break;
+      default: return 0;
+    }
+    if (va < vb) return sortAsc ? -1 : 1;
+    if (va > vb) return sortAsc ? 1 : -1;
+    return 0;
+  };
+  filteredHospitals.sort(cmp);
 }
 
 function renderHospitals(list) {
@@ -438,15 +594,6 @@ function renderHospitals(list) {
       <td>${h.phone || ''}</td>
     </tr>`;
   }).join('');
-}
-
-function filterHospitals() {
-  const q = document.getElementById('hospitalSearch').value.toLowerCase();
-  if (!q) { renderHospitals(allHospitals); return; }
-  renderHospitals(allHospitals.filter(h =>
-    (h.code + h.name + h.short_name + h.city + h.district + h.level
-     + (h.adapter_name||'') + h.aliases.join(' ')).toLowerCase().includes(q)
-  ));
 }
 
 // ===== 編輯別名 =====
@@ -515,8 +662,8 @@ async function saveEdit() {
     });
     const d = await r.json();
     if (d.ok) {
-      const skipped = d.aliases_skipped?.length ? ` (已被佔用: ${d.aliases_skipped.join(', ')})` : '';
-      msg.textContent = `已儲存${skipped}`;
+      const shared = d.aliases_shared?.length ? ` (共用: ${d.aliases_shared.join(', ')})` : '';
+      msg.textContent = `已儲存${shared}`;
       msg.className = 'msg ok';
       await loadHospitals();
       setTimeout(closeEdit, 800);
