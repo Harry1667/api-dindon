@@ -104,12 +104,12 @@ SHORTCUTS_KEY = "config:shortcuts"
 
 # 預設快捷指令
 DEFAULT_SHORTCUTS = [
-    {"trigger": "0, 返回, 主選單", "action": "返回", "label": "回主選單", "description": "回到主選單"},
+    {"trigger": "@, 0, 返回, 主選單", "action": "返回", "label": "回主選單", "description": "回到主選單"},
     {"trigger": "00, 醫院, 列表", "action": "醫院", "label": "醫院列表", "description": "查看支援的醫院"},
-    {"trigger": "9", "action": "返回", "label": "上一層", "description": "返回上一層選單"},
     {"trigger": "h, help, 說明, 幫助", "action": "說明", "label": "功能介紹", "description": "顯示使用說明"},
     {"trigger": "t, 追蹤, 我的追蹤", "action": "我的追蹤", "label": "追蹤狀態", "description": "查看目前追蹤"},
     {"trigger": "c, 取消追蹤, 停止追蹤", "action": "取消追蹤", "label": "取消追蹤", "description": "取消所有追蹤"},
+    {"trigger": "p, 預約, 預約追蹤, 預先追蹤", "action": "預約追蹤", "label": "預約追蹤", "description": "提前設定看診追蹤"},
 ]
 
 

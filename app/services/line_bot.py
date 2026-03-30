@@ -227,11 +227,10 @@ class LineBotService:
             if remaining < 0:
                 # 已過號
                 reply = (
-                    f"⚠️ 您的號碼可能已過號！\n"
+                    f"⚠️ 您的號碼已過號！\n"
                     f"{hospital_name} {p.department} {p.doctor_name} {p.clinic_room}\n"
                     f"您是第 {user_number} 號，目前已看到第 {p.current_number} 號\n"
-                    f"請儘速前往診間報到\n\n"
-                    f"已建立追蹤，若號碼有變動會通知您"
+                    f"請儘速前往診間報到"
                 )
             else:
                 reply = (
@@ -251,6 +250,75 @@ class LineBotService:
 
         return reply
 
+    async def _handle_track_with_mode(
+        self, user_id: str, hospital: str, dept: str, doctor: str,
+        user_number: int, notify_mode: str
+    ) -> str:
+        """建立追蹤（含模式選擇），由 webhook 追蹤流程呼叫"""
+        # 找 hospital_code
+        hospital_code = None
+        for alias, code in HOSPITAL_ALIASES.items():
+            if alias == hospital or hospital in alias:
+                hospital_code = code
+                break
+        if not hospital_code:
+            hospital_code = "wanfang"
+
+        # 查目前進度
+        results = await self.cache.search_progress(
+            hospital_code=hospital_code,
+            department=dept if dept else None,
+            doctor_name=doctor if doctor else None,
+        )
+
+        adapter = AdapterRegistry.get(hospital_code)
+        hospital_name = adapter.hospital_name if adapter else hospital
+
+        mode_labels = {"normal": "📢 每號提醒", "light": "🔔 輕量提醒", "final": "🔕 最後提醒"}
+        mode_label = mode_labels.get(notify_mode, "🔔 輕量提醒")
+
+        # 過號檢查
+        if results:
+            p = results[0]
+            remaining = user_number - p.current_number
+            if remaining < 0:
+                return (
+                    f"⚠️ 您的號碼已過號！\n"
+                    f"{hospital_name} {p.department} {p.doctor_name} {p.clinic_room}\n"
+                    f"您是第 {user_number} 號，目前已看到第 {p.current_number} 號\n"
+                    f"請儘速前往診間報到"
+                )
+
+        # 建立追蹤
+        task = await self.tracker.create_task(
+            line_user_id=user_id,
+            hospital_code=hospital_code,
+            department=dept or "",
+            doctor_name=doctor,
+            clinic_room=results[0].clinic_room if results else None,
+            user_number=user_number,
+            notify_mode=notify_mode,
+        )
+
+        if results:
+            p = results[0]
+            remaining = user_number - p.current_number
+            return (
+                f"✅ 追蹤成功！\n"
+                f"{hospital_name} {p.department} {p.doctor_name} {p.clinic_room}\n"
+                f"您是第 {user_number} 號，目前第 {p.current_number} 號\n"
+                f"還有約 {remaining} 位\n"
+                f"模式：{mode_label}"
+            )
+        else:
+            return (
+                f"✅ 追蹤成功！\n"
+                f"{hospital_name} {dept} {doctor}\n"
+                f"您是第 {user_number} 號\n"
+                f"模式：{mode_label}\n"
+                f"目前暫無即時資料，有進度時會通知您"
+            )
+
     async def _handle_cancel_track(self, user_id: str, text: str) -> str:
         """取消追蹤"""
         cancelled = await self.tracker.cancel_all_tasks(line_user_id=user_id)
@@ -262,18 +330,22 @@ class LineBotService:
         """查看追蹤列表"""
         tasks = await self.tracker.get_active_tasks(line_user_id=user_id)
         if not tasks:
-            return "您目前沒有進行中的追蹤任務。\n\n輸入「追蹤 萬芳 科別 醫師 我是N號」即可開始追蹤。"
+            return "您目前沒有進行中的追蹤任務。\n\n查詢醫院後可選擇「追蹤」功能。"
 
-        lines = ["您目前的追蹤任務：\n"]
+        mode_icons = {"normal": "📢", "light": "🔔", "final": "🔕"}
+        lines = ["🔔 您目前的追蹤：\n"]
         for t in tasks:
-            desc = f"{t.hospital_code} {t.department}"
+            adapter = AdapterRegistry.get(t.hospital_code)
+            hosp_name = adapter.hospital_name if adapter else t.hospital_code
+            desc = f"{hosp_name} {t.department}"
             if t.doctor_name:
                 desc += f" {t.doctor_name}"
-            if t.clinic_room:
-                desc += f" {t.clinic_room}"
-            lines.append(f"• {desc} — 您是第 {t.user_number} 號")
+            if t.session:
+                desc += f"（{t.session}）"
+            icon = mode_icons.get(t.notify_mode, "🔔")
+            lines.append(f"{icon} {desc} — 第 {t.user_number} 號")
 
-        lines.append("\n輸入「取消追蹤」可取消所有追蹤。")
+        lines.append("\n輸入 c 取消所有追蹤")
         return "\n".join(lines)
 
     def _get_help_message(self) -> str:

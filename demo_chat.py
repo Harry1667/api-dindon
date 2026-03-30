@@ -963,14 +963,13 @@ def _fetch_from_redis(hospital_code: str) -> list[dict] | None:
 
 def _after_result_menu(hospital_label: str, doctor_name: str = "", dept_name: str = "") -> str:
     """結果顯示後的操作選單"""
-    lines = ["\n接下來要做什麼？\n"]
-    if doctor_name:
-        lines.append(f"  1. 🔔 追蹤 {doctor_name}")
-    else:
-        lines.append(f"  1. 🔔 追蹤（請指定醫師）")
-    lines.append(f"  2. 🔄 查詢別科（{hospital_label}）")
-    lines.append(f"  3. 🏠 返回主選單")
-    return "\n".join(lines)
+    track_label = f"追蹤 {doctor_name}" if doctor_name else "追蹤（選擇醫師）"
+    return (
+        f"\n"
+        f"  1. 🔔 {track_label}\n"
+        f"  2. 🔄 查詢別科（{hospital_label}）\n"
+        f"  3. 🏠 返回主選單"
+    )
 
 
 def _format_results(results: list[dict], hospital_label: str,
@@ -1005,10 +1004,7 @@ def _format_results(results: list[dict], hospital_label: str,
             by_dept[dept] = []
         by_dept[dept].append(r)
 
-    lines = [
-        f"🏥 {hospital_label} 看診進度",
-        f"⏰ {time_str}　共 {len(results)} 個診間",
-    ]
+    lines = [f"🏥 {hospital_label} 看診進度", f"⏰ {time_str}"]
     if filter_label:
         lines.append(filter_label)
     else:
@@ -1021,17 +1017,17 @@ def _format_results(results: list[dict], hospital_label: str,
             nxt_num = item["next_number"]
 
             if cur_num > 0:
-                cur = f"👉 {cur_num}號"
+                cur = f"目前{cur_num}號"
                 if item["is_current_skipped"]:
                     cur += "(過號)"
                 if nxt_num > 0 and nxt_num != cur_num:
-                    nxt = f" → {nxt_num}號"
+                    nxt = f" → 下一位{nxt_num}號"
                     if item["is_next_skipped"]:
                         nxt += "(過號)"
                 else:
                     nxt = ""
             elif nxt_num > 0:
-                cur = f"⏳ 下一位{nxt_num}號"
+                cur = f"下一位{nxt_num}號"
                 if item["is_next_skipped"]:
                     cur += "(過號)"
                 nxt = ""
@@ -1067,6 +1063,129 @@ def _load_shortcuts() -> dict[str, str]:
     return {}
 
 
+async def _handle_pretrack_in_chat(msg: str, user_id: str, conv: dict) -> str:
+    """處理預約追蹤的多步驟流程（在 demo_chat 內完成，不依賴 webhook）"""
+    state = conv.get("state", "")
+
+    if msg in ("取消", "返回", "0"):
+        reset_conv(user_id)
+        return "已取消\n\n" + _main_menu(user_id)
+
+    # Step 1: 選醫院
+    if state == "pretrack_hospital":
+        quick = conv.get("quick_hospitals", [])
+        hospital_code, hospital_name = None, None
+        if msg in ("1", "2", "3") and quick:
+            idx = int(msg) - 1
+            if idx < len(quick):
+                hospital_code = quick[idx]
+                hospital_name = _code_to_name(hospital_code)
+        if not hospital_code:
+            resolved = _resolve_hospital(msg)
+            if resolved:
+                hospital_code, hospital_name = resolved[0], resolved[1]
+        if hospital_code:
+            _conversations[user_id] = {
+                "state": "pretrack_session",
+                "pretrack_hospital": hospital_name,
+                "pretrack_hospital_code": hospital_code,
+            }
+            return (
+                f"🏥 {hospital_name}\n\n"
+                f"請選擇看診時段：\n\n"
+                f"  1. 上午診\n"
+                f"  2. 下午診\n"
+                f"  3. 夜診"
+            )
+        return "找不到此醫院，請重新輸入\n輸入「取消」返回"
+
+    # Step 2: 選時段
+    if state == "pretrack_session":
+        session_map = {"1": "上午診", "2": "下午診", "3": "夜診",
+                       "上午": "上午診", "下午": "下午診", "夜": "夜診"}
+        session_time = session_map.get(msg.strip(), None)
+        if not session_time:
+            return "請輸入 1、2 或 3：\n\n  1. 上午診\n  2. 下午診\n  3. 夜診"
+        conv["pretrack_session"] = session_time
+        conv["state"] = "pretrack_dept"
+        return f"⏰ {session_time}\n\n請輸入科別名稱：\n（例如：骨科、心臟內科）"
+
+    # Step 3: 輸入科別
+    if state == "pretrack_dept":
+        conv["pretrack_dept"] = msg.strip()
+        conv["state"] = "pretrack_doctor"
+        return f"📌 {conv['pretrack_dept']}\n\n請輸入醫師姓名："
+
+    # Step 4: 輸入醫師
+    if state == "pretrack_doctor":
+        conv["pretrack_doctor"] = msg.strip()
+        conv["state"] = "pretrack_number"
+        return f"👨‍⚕️ {conv['pretrack_doctor']}\n\n請輸入您的掛號號碼："
+
+    # Step 5: 輸入號碼
+    if state == "pretrack_number":
+        numbers = re.findall(r"\d+", msg)
+        if not numbers:
+            return "請輸入數字號碼"
+        conv["pretrack_number"] = int(numbers[0])
+        conv["state"] = "pretrack_mode"
+        return (
+            f"您是第 {conv['pretrack_number']} 號\n\n"
+            f"請選擇提醒模式：\n\n"
+            f"  1. 📢 每號提醒\n"
+            f"  2. 🔔 輕量提醒（推薦）\n"
+            f"  3. 🔕 最後提醒"
+        )
+
+    # Step 6: 選模式 → 建立追蹤
+    if state == "pretrack_mode":
+        mode_map = {"1": "normal", "2": "light", "3": "final"}
+        mode = mode_map.get(msg.strip(), None)
+        if not mode:
+            return "請輸入 1、2 或 3"
+
+        hospital = conv["pretrack_hospital"]
+        hospital_code = conv["pretrack_hospital_code"]
+        session_time = conv.get("pretrack_session", "")
+        dept = conv.get("pretrack_dept", "")
+        doctor = conv.get("pretrack_doctor", "")
+        clinic_room = conv.get("pretrack_room", None)
+        user_number = conv["pretrack_number"]
+        reset_conv(user_id)
+
+        from app.services.tracker import TrackerService
+        from app.scrapers.registry import AdapterRegistry
+        tracker = TrackerService()
+        await tracker.create_task(
+            line_user_id=user_id,
+            hospital_code=hospital_code,
+            department=dept,
+            doctor_name=doctor or None,
+            clinic_room=clinic_room,
+            user_number=user_number,
+            notify_mode=mode,
+            session_time=session_time or None,
+        )
+
+        adapter = AdapterRegistry.get(hospital_code)
+        hosp_name = adapter.hospital_name if adapter else hospital
+        mode_labels = {"normal": "📢 每號提醒", "light": "🔔 輕量提醒", "final": "🔕 最後提醒"}
+
+        detail = f"{dept} — {doctor}" if dept and doctor else (clinic_room or dept or doctor or "")
+        session_line = f"⏰ {session_time}\n" if session_time else ""
+        return (
+            f"✅ 追蹤成功！\n\n"
+            f"🏥 {hosp_name}\n"
+            f"{session_line}"
+            f"📌 {detail}\n"
+            f"🎫 第 {user_number} 號\n"
+            f"模式：{mode_labels.get(mode, '🔔')}\n\n"
+            f"系統會自動監控，快到號時通知您"
+        )
+
+    return "操作有誤，請重新輸入\n輸入「取消」返回"
+
+
 async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
     now = datetime.now(TW_TZ)
     time_str = now.strftime("%m/%d %H:%M")
@@ -1083,6 +1202,20 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
 
     # ====== 全域指令（任何狀態下都能觸發）======
 
+    # 預約追蹤（進入 webhook 的 pretrack 流程）
+    if msg in ("預約追蹤", "預約", "預先追蹤"):
+        # 需要先選醫院 → 存到 conv，由 webhook pretrack flow 接手
+        top = get_top_hospitals(user_id, limit=3)
+        lines = ["📅 預約追蹤 — 提前設定，看診時自動通知\n"]
+        if top:
+            lines.append("常用醫院：")
+            for i, code in enumerate(top, 1):
+                lines.append(f"  {i}. {_code_to_name(code)}")
+            lines.append("")
+        lines.append("請輸入醫院名稱：")
+        _conversations[user_id] = {"state": "pretrack_hospital", "quick_hospitals": top}
+        return "\n".join(lines)
+
     # 說明 / 幫助
     if msg in ("說明", "幫助", "help", "使用說明", "功能介紹"):
         reset_conv(user_id)
@@ -1093,9 +1226,13 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
             "   例如：萬芳、台大、三總\n\n"
             "🔔 追蹤掛號：查詢後選「追蹤」\n"
             "   系統會在快到號時通知您\n\n"
+            "📅 預約追蹤：提前設定看診追蹤\n"
+            "   輸入「預約」即可開始\n\n"
             "📌 快捷指令：\n"
-            "   0 — 回主選單\n"
+            "   @ — 回主選單\n"
+            "   / — 返回上一層\n"
             "   00 — 醫院列表\n"
+            "   p — 預約追蹤\n"
             "   t — 查看追蹤狀態\n"
             "   c — 取消追蹤\n"
             "   h — 顯示此說明\n\n"
@@ -1115,6 +1252,10 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
         svc = LineBotService()
         return await svc._handle_cancel_track(user_id, msg)
 
+    # 預約追蹤 — 多步驟流程
+    if conv.get("state", "").startswith("pretrack_"):
+        return await _handle_pretrack_in_chat(msg, user_id, conv)
+
     # 「重置」/「取消」— 回到初始狀態
     if msg in ("重置", "取消", "返回"):
         reset_conv(user_id)
@@ -1130,7 +1271,7 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
 
     # 查詢醫院列表（快捷數字不觸發）
     is_mock_query = ENABLE_MOCK_HOSPITAL and ("測試" in msg or "test" in msg_lower)
-    if not _quick_resolved and not is_mock_query and any(kw in msg for kw in ["醫院", "列表", "有哪些", "支援"]):
+    if not _quick_resolved and not is_mock_query and msg in ("醫院", "列表", "有哪些", "支援"):
         reset_conv(user_id)
         mock_section = ""
         if ENABLE_MOCK_HOSPITAL:
@@ -1189,7 +1330,23 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
                 # 回傳追蹤指令格式讓前端處理
                 return f"__TRACK__{hosp}\t{dept}\t{doctor}"
             else:
-                return "❌ 請指定要追蹤的醫師\n\n💡 格式：追蹤 醫院 科別 醫師名"
+                # 多位醫師時，引導選醫師（只列該科的醫師）
+                results = conv.get("results", [])
+                dept = conv.get("last_dept", "")
+                dept_results = [r for r in results if r["department"] == dept] if dept else results
+                doctors = list(dict.fromkeys(r["doctor_name"] for r in dept_results))
+                if len(doctors) > 1:
+                    hosp_label = conv["hospital_label"]
+                    conv["state"] = "choose_doctor"
+                    conv["doctor_list"] = doctors
+                    conv["chosen_dept"] = dept
+                    conv["dept_filtered"] = dept_results
+                    lines = [f"🏥 {hosp_label} — {dept}", f"請選擇要追蹤的醫師：\n"]
+                    for i, d in enumerate(doctors, 1):
+                        lines.append(f"  {i}. {d}")
+                    lines.append("\n💡 輸入數字或醫師名")
+                    return "\n".join(lines)
+                return "❌ 無法追蹤，請重新查詢"
 
         if msg in ("2", "別科", "查詢別科", "換科"):
             # 重新顯示科別列表（用已快取的 results）
@@ -1218,7 +1375,7 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
                 mark = " ⭐" if dept in dept_history else ""
                 lines.append(f"  {i}. {dept}（{count}位醫師）{mark}")
             lines.append(f"\n💡 輸入數字或科別名稱")
-            lines.append(f"💡 輸入 9 返回主選單")
+            lines.append(f"💡 輸入 @ 返回主選單")
             return "\n".join(lines)
 
         if msg in ("3", "返回", "主選單"):
@@ -1230,7 +1387,83 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
             reset_conv(user_id)
             return await handle_message(msg, user_id)
 
-        return "請輸入 1～3 的數字選擇操作\n\n  1. 🔔 追蹤\n  2. 🔄 查詢別科\n  3. 🏠 返回主選單"
+        doctor = conv.get("last_doctor", "")
+        hosp = conv.get("hospital_label", "")
+        track_label = f"追蹤 {doctor}" if doctor else "追蹤"
+        return (
+            f"請輸入 1～3：\n\n"
+            f"  1. 🔔 {track_label}\n"
+            f"  2. 🔄 查詢別科（{hosp}）\n"
+            f"  3. 🏠 返回主選單"
+        )
+
+    if conv["state"] == "choose_session":
+        # 使用者正在選時段
+        results = conv.get("results", [])
+        all_sessions = list(dict.fromkeys(r.get("session", "") for r in results if r.get("session")))
+
+        if msg in ("@", "主選單"):
+            reset_conv(user_id)
+            return "✅ 已返回主選單\n\n" + _main_menu(user_id)
+
+        chosen_session = None
+        if msg.isdigit():
+            idx = int(msg) - 1
+            if idx == len(all_sessions):
+                # 「全部時段」
+                chosen_session = "__all__"
+            elif 0 <= idx < len(all_sessions):
+                chosen_session = all_sessions[idx]
+
+        # 也支援文字匹配
+        if not chosen_session:
+            for s in all_sessions:
+                if msg in s:
+                    chosen_session = s
+                    break
+
+        if not chosen_session:
+            return "請輸入數字選擇時段\n💡 輸入 @ 返回主選單"
+
+        # 篩選結果
+        if chosen_session != "__all__":
+            results = [r for r in results if r.get("session") == chosen_session]
+            conv["results"] = results
+
+        # 接下來走正常的科別選擇流程
+        hospital_code = conv["hospital_code"]
+        hospital_label = conv["hospital_label"]
+        dept_set = list(dict.fromkeys(r["department"] for r in results))
+        record_history(user_id, hospital_code)
+
+        if len(dept_set) <= 1:
+            last_doc = ""
+            docs_in = set(r["doctor_name"] for r in results)
+            if len(docs_in) == 1:
+                last_doc = list(docs_in)[0]
+            result_text = _format_results(results, hospital_label, time_str=time_str)
+            set_after_result(user_id, hospital_code, hospital_label, results,
+                             dept_name=dept_set[0] if dept_set else "", doctor_name=last_doc)
+            return result_text + _after_result_menu(hospital_label, last_doc, dept_set[0] if dept_set else "")
+
+        dept_history = get_history_counts(user_id, hospital_code, field="department")
+        dept_sorted = sort_by_history(dept_set, dept_history)
+        conv["state"] = "choose_dept"
+        conv["dept_list"] = dept_sorted
+
+        session_label = f"（{chosen_session}）" if chosen_session != "__all__" else ""
+        lines = [
+            f"🏥 {hospital_label}{session_label}",
+            f"⏰ {time_str}　共 {len(results)} 個診間、{len(dept_sorted)} 個科別\n",
+            "請問您想看哪科？\n",
+        ]
+        for i, dept in enumerate(dept_sorted, 1):
+            count = len([r for r in results if r["department"] == dept])
+            mark = " ⭐" if dept in dept_history else ""
+            lines.append(f"  {i}. {dept}（{count}位醫師）{mark}")
+        lines.append(f"\n💡 輸入數字或科別名稱")
+        lines.append(f"💡 輸入 @ 返回主選單")
+        return "\n".join(lines)
 
     if conv["state"] == "choose_dept":
         # 使用者正在選科別
@@ -1238,7 +1471,7 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
         chosen_dept = None
 
         # 9 = 返回主選單
-        if msg == "9":
+        if msg in ("@", "主選單"):
             reset_conv(user_id)
             return "✅ 已返回主選單\n\n" + _main_menu(user_id)
 
@@ -1248,7 +1481,7 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
             if 1 <= n <= len(dept_list):
                 chosen_dept = dept_list[n - 1]
             else:
-                return f"❌ 請輸入 1～{len(dept_list)} 的數字，或直接輸入科別名稱\n💡 輸入 9 返回主選單"
+                return f"❌ 請輸入 1～{len(dept_list)} 的數字，或直接輸入科別名稱\n💡 輸入 @ 返回主選單"
 
         # 文字匹配（優先完全匹配，再找最長子字串匹配）
         if not chosen_dept:
@@ -1267,7 +1500,7 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
             if _resolve_hospital(msg):
                 reset_conv(user_id)
                 return await handle_message(msg, user_id)  # 遞迴重新處理
-            return f"❌ 找不到「{msg}」\n請輸入數字編號或科別名稱\n💡 輸入 9 返回主選單"
+            return f"❌ 找不到「{msg}」\n請輸入數字編號或科別名稱\n💡 輸入 @ 返回主選單"
 
         # 選到科別了 → 篩選出該科的醫師
         filtered = [r for r in conv["results"] if r["department"] == chosen_dept]
@@ -1299,8 +1532,8 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
             mark = " ⭐" if doc in doc_history else ""
             lines.append(f"  {i}. {doc}{mark}")
         lines.append(f"\n💡 輸入數字或醫師名")
-        lines.append(f"💡 輸入 0 返回科別")
-        lines.append(f"💡 輸入 9 返回主選單")
+        lines.append(f"💡 輸入 / 返回科別")
+        lines.append(f"💡 輸入 @ 返回主選單")
         return "\n".join(lines)
 
     if conv["state"] == "choose_doctor":
@@ -1308,8 +1541,8 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
         doctor_list = conv["doctor_list"]
         chosen_doctor = None
 
-        # 0 = 返回科別列表
-        if msg == "0":
+        # * = 返回科別列表
+        if msg in ("/", "返回", "上一層"):
             # 重新顯示科別列表
             results = conv.get("results", [])
             dept_set = list(dict.fromkeys(r["department"] for r in results))
@@ -1327,11 +1560,11 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
                 mark = " ⭐" if dept in dept_history else ""
                 lines.append(f"  {i}. {dept}（{count}位醫師）{mark}")
             lines.append(f"\n💡 輸入數字或科別名稱")
-            lines.append(f"💡 輸入 9 返回主選單")
+            lines.append(f"💡 輸入 @ 返回主選單")
             return "\n".join(lines)
 
         # 9 = 返回主選單
-        if msg == "9":
+        if msg in ("@", "主選單"):
             reset_conv(user_id)
             return "✅ 已返回主選單\n\n" + _main_menu(user_id)
 
@@ -1340,7 +1573,7 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
             if 0 <= idx < len(doctor_list):
                 chosen_doctor = doctor_list[idx]
             else:
-                return f"❌ 請輸入 1～{len(doctor_list)} 的數字，或直接輸入醫師名\n💡 輸入 0 返回科別\n💡 輸入 9 返回主選單"
+                return f"❌ 請輸入 1～{len(doctor_list)} 的數字，或直接輸入醫師名\n💡 輸入 / 返回科別\n💡 輸入 @ 返回主選單"
 
         if not chosen_doctor:
             for d in doctor_list:
@@ -1358,7 +1591,7 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
             if _resolve_hospital(msg):
                 reset_conv(user_id)
                 return await handle_message(msg, user_id)
-            return f"❌ 找不到「{msg}」\n請輸入數字編號或醫師名\n💡 輸入 0 返回科別\n💡 輸入 9 返回主選單"
+            return f"❌ 找不到「{msg}」\n請輸入數字編號或醫師名\n💡 輸入 / 返回科別\n💡 輸入 @ 返回主選單"
 
         # 找到醫師了 → 顯示結果
         filtered = [r for r in conv["dept_filtered"] if r["doctor_name"] == chosen_doctor]
@@ -1377,13 +1610,48 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
 
     hospital_code, hospital_label, extra_filter = resolved
 
+    # 快速追蹤：「萬芳 下午 303診 8號」或「萬芳 303診 8」（不需要查資料）
+    if extra_filter and re.search(r"\d+診", extra_filter) and re.search(r"\d+號?$", extra_filter.rstrip("號")):
+        m_room = re.search(r"(\d+診)", extra_filter)
+        m_num = re.search(r"(\d+)\s*號?\s*$", extra_filter)
+        if m_room and m_num:
+            clinic_room = m_room.group(1)
+            user_number = int(m_num.group(1))
+            # 解析時段
+            quick_session = None
+            for kw, val in [("上午", "上午診"), ("下午", "下午診"), ("夜", "夜診")]:
+                if kw in extra_filter:
+                    quick_session = val
+                    break
+            # 進入追蹤流程：問號碼已有，直接問模式
+            _conversations[user_id] = {
+                "state": "pretrack_mode",
+                "pretrack_hospital": hospital_label,
+                "pretrack_hospital_code": hospital_code,
+                "pretrack_session": quick_session or "",
+                "pretrack_dept": "",
+                "pretrack_doctor": "",
+                "pretrack_number": user_number,
+                "pretrack_room": clinic_room,
+            }
+            session_hint = f"⏰ {quick_session}\n" if quick_session else ""
+            return (
+                f"🔔 快速追蹤\n"
+                f"🏥 {hospital_label} {clinic_room}\n"
+                f"{session_hint}"
+                f"🎫 第 {user_number} 號\n\n"
+                f"請選擇提醒模式：\n\n"
+                f"  1. 📢 每號提醒\n"
+                f"  2. 🔔 輕量提醒（推薦）\n"
+                f"  3. 🔕 最後提醒"
+            )
+
     # 抓取看診資料
     try:
         results = await _fetch_results(hospital_code, hospital_label)
     except Exception as e:
         return f"❌ {hospital_label} 查詢失敗：{e}"
 
-    # None = 尚未支援的醫院
     if results is None:
         return (
             f"🏥 {hospital_label}\n\n"
@@ -1399,6 +1667,21 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
             f"⏰ {time_str}\n\n"
             f"目前醫師休息中，請在看診時間再查詢"
         )
+
+    # 解析 extra_filter 中的時段關鍵字
+    session_filter = None
+    if extra_filter:
+        for kw, val in [("上午", "上午診"), ("早", "上午診"), ("下午", "下午診"), ("午診", "下午診"), ("夜", "夜診")]:
+            if kw in extra_filter:
+                session_filter = val
+                extra_filter = extra_filter.replace(kw, "").replace("診", "").strip()
+                break
+
+    # 時段篩選
+    if session_filter:
+        results = [r for r in results if r.get("session") == session_filter]
+        if not results:
+            return f"🏥 {hospital_label}\n⏰ {time_str}\n\n{session_filter}目前沒有看診中的診間"
 
     # 如果使用者已附帶篩選關鍵字（如「萬芳 骨科」），直接篩選並顯示
     if extra_filter:
@@ -1428,6 +1711,26 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
                              dept_name=last_dept, doctor_name=last_doc)
             return result_text + _after_result_menu(hospital_label, last_doc, last_dept)
         # 篩選無結果，忽略 extra_filter，進入選科流程
+
+    # 檢查是否有多個時段 → 讓用戶先選
+    all_sessions = list(dict.fromkeys(r.get("session", "") for r in results if r.get("session")))
+    if len(all_sessions) > 1 and not session_filter:
+        session_labels = {"上午診": "🌅 上午診", "下午診": "☀️ 下午診", "夜診": "🌙 夜診"}
+        conv["state"] = "choose_session"
+        conv["hospital_code"] = hospital_code
+        conv["hospital_label"] = hospital_label
+        conv["results"] = results
+        lines = [
+            f"🏥 {hospital_label}",
+            f"⏰ {time_str}　共 {len(results)} 個診間\n",
+            "請選擇時段：\n",
+        ]
+        for i, s in enumerate(all_sessions, 1):
+            count = len([r for r in results if r.get("session") == s])
+            lines.append(f"  {i}. {session_labels.get(s, s)}（{count}個診間）")
+        lines.append(f"  {len(all_sessions)+1}. 全部時段")
+        lines.append(f"\n💡 輸入數字選擇")
+        return "\n".join(lines)
 
     # 提取所有科別
     dept_set = list(dict.fromkeys(r["department"] for r in results))
@@ -1467,7 +1770,7 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
         mark = " ⭐" if dept in dept_history else ""
         lines.append(f"  {i}. {dept}（{count}位醫師）{mark}")
     lines.append(f"\n💡 輸入數字或科別名稱")
-    lines.append(f"💡 輸入 9 返回主選單")
+    lines.append(f"💡 輸入 @ 返回主選單")
     return "\n".join(lines)
 
 
@@ -2111,7 +2414,7 @@ async function sendMessage() {
             addBotMsg(data.reply);
             // 判斷是否仍在選擇流程中（含科別/醫師選單 或 after_result 選單）
             const r = data.reply || '';
-            if (r.includes('哪科') || r.includes('請選擇') || r.includes('接下來要做什麼')) {
+            if (r.includes('哪科') || r.includes('請選擇') || r.includes('🔔') && r.includes('查詢別科')) {
                 inBackendFlow = true;
             } else {
                 inBackendFlow = false;

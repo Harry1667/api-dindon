@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database import async_session as default_session
 from app.models.user import User
-from app.models.tracking_task import TrackingTask, TaskStatus
+from app.models.tracking_task import TrackingTask, TaskStatus, NotifyMode
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,8 @@ class TrackerService:
         clinic_room: str | None,
         user_number: int,
         threshold: int = 5,
+        notify_mode: str = NotifyMode.LIGHT.value,
+        session_time: str | None = None,
     ) -> TrackingTask:
         """建立追蹤任務"""
         async with self._session_factory() as session:
@@ -51,6 +53,8 @@ class TrackerService:
                 clinic_room=clinic_room,
                 user_number=user_number,
                 threshold=threshold,
+                notify_mode=notify_mode,
+                session=session_time,
                 status=TaskStatus.ACTIVE,
             )
             session.add(task)
@@ -83,6 +87,16 @@ class TrackerService:
                 .where(TrackingTask.status == TaskStatus.ACTIVE)
             )
             return [(row[0], row[1]) for row in result.all()]
+
+    async def update_last_remaining(self, task_id: int, remaining: int):
+        """更新上次通知時的剩餘人數"""
+        async with self._session_factory() as session:
+            await session.execute(
+                update(TrackingTask)
+                .where(TrackingTask.id == task_id)
+                .values(last_notified_remaining=remaining)
+            )
+            await session.commit()
 
     async def mark_notified(self, task_id: int):
         """標記任務已通知"""
