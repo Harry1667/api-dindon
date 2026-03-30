@@ -1,13 +1,13 @@
 version: "3.8"
 
 services:
-  # === LINE Bot（測試頻道）===
-  linebot:
+  # === FastAPI 主應用（測試 LINE@ 頻道）===
+  app:
     build: .
-    container_name: ajz-dindon
-    command: uvicorn line_bot:app --host 0.0.0.0 --port 5000 --reload
+    container_name: dindon-dev-app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     ports:
-      - "5000:5000"
+      - "8001:8000"
     env_file:
       - .env.dev
     depends_on:
@@ -18,26 +18,10 @@ services:
       - ./data:/app/data
     restart: unless-stopped
 
-  # === FastAPI 主應用（開發模式）===
-  app:
-    build: .
-    container_name: medqueue-app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-    ports:
-      - "8001:8000"
-    env_file:
-      - .env.dev
-    depends_on:
-      - redis
-    volumes:
-      - .:/app        # 掛載原始碼，改 code 自動 reload
-      - ./logs:/app/logs
-    restart: unless-stopped
-
   # === Celery Worker ===
   worker:
     build: .
-    container_name: medqueue-worker
+    container_name: dindon-dev-worker
     command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
     env_file:
       - .env.dev
@@ -51,7 +35,7 @@ services:
   # === Celery Beat ===
   beat:
     build: .
-    container_name: medqueue-beat
+    container_name: dindon-dev-beat
     command: celery -A app.tasks.celery_app beat --loglevel=info
     env_file:
       - .env.dev
@@ -65,13 +49,13 @@ services:
   # === Redis ===
   redis:
     image: redis:7-alpine
-    container_name: medqueue-redis
+    container_name: dindon-dev-redis
     ports:
-      - "6380:6379"      # 6379 被本機佔用，改 6380
+      - "6380:6379"
     volumes:
-      - redis_data:/data
+      - redis_dev_data:/data
     restart: unless-stopped
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
 
 volumes:
-  redis_data:
+  redis_dev_data:
