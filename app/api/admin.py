@@ -97,6 +97,58 @@ async def api_stats(admin_token: str | None = Cookie(None)):
 
 
 # ============================================================
+# 追蹤回饋 API
+# ============================================================
+
+@router.get("/api/feedbacks")
+async def api_feedbacks(admin_token: str | None = Cookie(None)):
+    if not _check_auth(admin_token):
+        return JSONResponse({"error": "未登入"}, status_code=401)
+
+    from sqlalchemy import select
+    from app.models.database import async_session
+    from app.models.tracking_feedback import TrackingFeedback
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(TrackingFeedback).order_by(TrackingFeedback.created_at.desc()).limit(100)
+        )
+        feedbacks = result.scalars().all()
+
+    from app.scrapers.registry import AdapterRegistry
+
+    end_reason_labels = {
+        "arrived": "✅ 到號", "passed": "⚠️ 過號", "doctor_gone": "📴 停診",
+        "timeout": "⏰ 逾時", "cancelled": "🚫 取消",
+    }
+
+    return [
+        {
+            "id": f.id,
+            "task_id": f.task_id,
+            "line_user_id": f.line_user_id[:8] + "...",
+            "hospital": getattr(f, 'hospital_name', None) or (AdapterRegistry.get(f.hospital_code).hospital_name if AdapterRegistry.get(f.hospital_code) else f.hospital_code),
+            "department": f.department,
+            "doctor_name": f.doctor_name,
+            "clinic_room": f.clinic_room,
+            "session": f.session,
+            "user_number": f.user_number,
+            "notify_mode": f.notify_mode,
+            "track_created_at": f.track_created_at.strftime("%m/%d %H:%M") if getattr(f, 'track_created_at', None) else "",
+            "final_current": f.final_current,
+            "notify_count": getattr(f, 'notify_count', 0),
+            "end_reason": end_reason_labels.get(getattr(f, 'end_reason', ''), getattr(f, 'end_reason', '')),
+            "final_message": f.final_message,
+            "is_correct": f.is_correct,
+            "user_comment": f.user_comment,
+            "conversation_log": getattr(f, 'conversation_log', None) or "[]",
+            "created_at": f.created_at.strftime("%m/%d %H:%M") if f.created_at else "",
+        }
+        for f in feedbacks
+    ]
+
+
+# ============================================================
 # 快捷指令管理（存 Redis）
 # ============================================================
 
@@ -504,6 +556,7 @@ th.sortable span { font-size:10px; }
     <button id="tabStats" class="active" onclick="switchTab('stats')">統計總覽</button>
     <button id="tabHospitals" onclick="switchTab('hospitals')">醫院管理</button>
     <button id="tabShortcuts" onclick="switchTab('shortcuts')">快捷指令</button>
+    <button id="tabFeedback" onclick="switchTab('feedback')">回饋記錄</button>
     <button class="logout" onclick="doLogout()">登出</button>
   </div>
 </div>
@@ -544,6 +597,33 @@ th.sortable span { font-size:10px; }
         </tr>
       </thead>
       <tbody id="hospitalBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 回饋記錄頁 -->
+<div class="container hidden" id="pageFeedback">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <h2 style="font-size:16px;margin:0;">追蹤回饋記錄</h2>
+    <span id="feedbackStats" style="font-size:13px;color:#888;"></span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>用戶</th>
+        <th>追蹤建立</th>
+        <th>醫院</th>
+        <th>科別/醫師</th>
+        <th>診間</th>
+        <th>掛號</th>
+        <th>結束號碼</th>
+        <th>結束原因</th>
+        <th>通知次數</th>
+        <th>回饋</th>
+        <th>用戶說明</th>
+        <th>對話</th>
+      </tr></thead>
+      <tbody id="feedbackBody"></tbody>
     </table>
   </div>
 </div>
@@ -615,13 +695,14 @@ async function doLogout() {
 // ===== 切頁 =====
 function switchTab(tab) {
   currentTab = tab;
-  for (const p of ['Stats','Hospitals','Shortcuts']) {
+  for (const p of ['Stats','Hospitals','Shortcuts','Feedback']) {
     document.getElementById('page'+p).classList.toggle('hidden', tab !== p.toLowerCase());
     document.getElementById('tab'+p).classList.toggle('active', tab === p.toLowerCase());
   }
   if (tab === 'stats') loadStats();
   if (tab === 'hospitals') loadHospitals();
   if (tab === 'shortcuts') loadShortcuts();
+  if (tab === 'feedback') loadFeedback();
 }
 
 // ===== 統計 =====
@@ -894,6 +975,82 @@ async function saveEdit() {
     }
   } catch(e) {}
 })();
+// ===== 對話記錄 Modal =====
+function showConvLog(logJson, feedbackId) {
+  try {
+    const logs = typeof logJson === 'string' ? JSON.parse(logJson) : logJson;
+    if (!logs || !logs.length) {
+      alert('此追蹤無對話記錄');
+      return;
+    }
+    const roleLabels = {user:'👤 用戶', system:'🤖 系統', notify:'🔔 通知'};
+    const roleColors = {user:'#e3f2fd', system:'#f5f5f5', notify:'#fff8e1'};
+    const html = logs.map(e => {
+      const label = roleLabels[e.role] || e.role;
+      const bg = roleColors[e.role] || '#fff';
+      return `<div style="margin:4px 0;padding:6px 10px;background:${bg};border-radius:6px;font-size:13px;">
+        <span style="color:#888;font-size:11px;">${e.time || ''}</span> <b>${label}</b><br>
+        <span style="white-space:pre-wrap;">${e.message}</span>
+      </div>`;
+    }).join('');
+    // Simple modal
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+    overlay.innerHTML = `<div style="background:#fff;border-radius:12px;padding:20px;max-width:500px;width:90%;max-height:80vh;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <b>對話記錄 #${feedbackId}</b>
+        <button onclick="this.closest('div[style*=fixed]').remove()" style="border:none;background:none;font-size:18px;cursor:pointer;">✕</button>
+      </div>
+      ${html}
+    </div>`;
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
+  } catch(e) { alert('解析對話記錄失敗'); }
+}
+
+// ===== 回饋記錄 =====
+async function loadFeedback() {
+  try {
+    const r = await fetch('/admin/api/feedbacks');
+    if (r.status === 401) { location.reload(); return; }
+    const data = await r.json();
+    const tbody = document.getElementById('feedbackBody');
+    const total = data.length;
+    const errors = data.filter(f => f.is_correct === false).length;
+    const correct = data.filter(f => f.is_correct === true).length;
+    const pending = data.filter(f => f.is_correct === null).length;
+    document.getElementById('feedbackStats').textContent =
+      `共 ${total} 筆｜✅ ${correct} 正確｜❌ ${errors} 有誤｜⏳ ${pending} 未回饋`;
+
+    if (!data.length) {
+      tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;color:#888;padding:20px;">尚無回饋記錄</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.map(f => {
+      let badge = '';
+      if (f.is_correct === true) badge = '<span class="badge badge-green">✅ 正確</span>';
+      else if (f.is_correct === false) badge = '<span class="badge badge-red">❌ 有誤</span>';
+      else badge = '<span class="badge badge-gray">⏳ 未回饋</span>';
+      const detail = f.doctor_name ? `${f.department}<br>${f.doctor_name}` : f.department;
+      const session = f.session ? `<br><small>${f.session}</small>` : '';
+      return `<tr${f.is_correct === false ? ' style="background:#fff5f5;"' : ''}>
+        <td style="font-size:11px;">${f.line_user_id}</td>
+        <td style="white-space:nowrap">${f.track_created_at || '-'}</td>
+        <td>${f.hospital}${session}</td>
+        <td>${detail}</td>
+        <td>${f.clinic_room || '-'}</td>
+        <td>${f.user_number}號</td>
+        <td>${f.final_current}號</td>
+        <td>${f.end_reason || '-'}</td>
+        <td style="text-align:center">${f.notify_count || 0}</td>
+        <td>${badge}</td>
+        <td style="max-width:200px;word-break:break-all;">${f.user_comment || '-'}</td>
+        <td><button onclick='showConvLog(${JSON.stringify(f.conversation_log)}, ${f.id})' style="padding:2px 8px;border:1px solid #4a90d9;border-radius:4px;background:#fff;color:#4a90d9;cursor:pointer;font-size:11px;">查看</button></td>
+      </tr>`;
+    }).join('');
+  } catch(e) { console.error(e); }
+}
+
 // ===== 快捷指令 =====
 let shortcuts = [];
 

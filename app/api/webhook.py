@@ -17,6 +17,7 @@ from linebot.v3.webhooks import (
 
 from app.config import settings
 from app.services.line_bot import LineBotService
+from app.services.track_logger import log_message as track_log
 from demo_chat import handle_message, reset_conv, _conversations
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,29 @@ async def _handle_event(event):
                 return
             reply = await handle_message(text, user_id)
             reply = _convert_for_line(reply, user_id)
+
+            # 記錄追蹤相關對話
+            _log_if_tracking(user_id, text, reply)
+
             await line_bot_service.reply(event.reply_token, reply)
+
+
+def _log_if_tracking(user_id: str, user_text: str, system_reply: str):
+    """如果用戶有活躍追蹤任務，記錄對話"""
+    try:
+        from app.services.tracker import TrackerService
+        import asyncio
+
+        # 簡易判斷：conv 裡有 track 相關 state 就記錄
+        conv = _conversations.get(user_id, {})
+        state = conv.get("state", "")
+        if any(kw in state for kw in ("track", "feedback", "pretrack")):
+            task_id = conv.get("feedback_id") or conv.get("task_id", 0)
+            if task_id:
+                track_log(task_id, "user", user_text)
+                track_log(task_id, "system", system_reply[:300])
+    except Exception:
+        pass
 
 
 def _convert_for_line(reply: str, user_id: str) -> str:

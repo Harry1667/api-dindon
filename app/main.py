@@ -24,6 +24,7 @@ import app.models.hospital_alias  # noqa: F401
 import app.models.user_query_history  # noqa: F401
 import app.models.department  # noqa: F401 (Department + DepartmentGuide)
 import app.models.doctor  # noqa: F401
+import app.models.tracking_feedback  # noqa: F401
 
 # 設定 logging
 logging.basicConfig(

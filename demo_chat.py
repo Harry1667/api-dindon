@@ -1063,6 +1063,62 @@ def _load_shortcuts() -> dict[str, str]:
     return {}
 
 
+async def _handle_feedback(msg: str, user_id: str, conv: dict) -> str:
+    """處理追蹤結束後的用戶回饋"""
+    feedback_id = conv.get("feedback_id")
+
+    if msg == "0":
+        # 正確
+        await _save_feedback(feedback_id, is_correct=True)
+        reset_conv(user_id)
+        return "✅ 感謝回饋！\n\n" + _main_menu(user_id)
+
+    elif msg == "1":
+        # 有誤 → 先記錄，再問要不要補充
+        await _save_feedback(feedback_id, is_correct=False)
+        conv["state"] = "waiting_feedback_comment"
+        return (
+            "📝 已記錄，感謝回饋！我們會持續改善\n\n"
+            "如方便補充哪裡有誤，請直接輸入：\n"
+            "（例如：號碼不對、通知太晚）\n\n"
+            "輸入 0 跳過"
+        )
+
+    elif conv.get("state") == "waiting_feedback_comment":
+        if msg != "0":
+            await _save_feedback(feedback_id, is_correct=False, comment=msg)
+        reset_conv(user_id)
+        return "感謝您的回饋！\n\n" + _main_menu(user_id)
+
+    else:
+        return "請回覆 0（正確）或 1（有誤）"
+
+
+async def _save_feedback(feedback_id: int | None, is_correct: bool, comment: str = None):
+    """更新回饋記錄"""
+    if not feedback_id:
+        return
+    try:
+        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+        from sqlalchemy import update
+        from app.config import settings
+        from app.models.tracking_feedback import TrackingFeedback
+
+        eng = create_async_engine(settings.database_url, echo=False)
+        sess = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
+        async with sess() as session:
+            await session.execute(
+                update(TrackingFeedback)
+                .where(TrackingFeedback.id == feedback_id)
+                .values(is_correct=is_correct, user_comment=comment)
+            )
+            await session.commit()
+        await eng.dispose()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"儲存回饋失敗: {e}")
+
+
 async def _handle_pretrack_in_chat(msg: str, user_id: str, conv: dict) -> str:
     """處理預約追蹤的多步驟流程（在 demo_chat 內完成，不依賴 webhook）"""
     state = conv.get("state", "")
@@ -1251,6 +1307,10 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
         from app.services.line_bot import LineBotService
         svc = LineBotService()
         return await svc._handle_cancel_track(user_id, msg)
+
+    # 追蹤回饋
+    if conv.get("state") in ("waiting_feedback", "waiting_feedback_comment"):
+        return await _handle_feedback(msg, user_id, conv)
 
     # 預約追蹤 — 多步驟流程
     if conv.get("state", "").startswith("pretrack_"):
@@ -1527,10 +1587,27 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
         conv["doctor_list"] = doctors
         conv["dept_filtered"] = filtered
 
-        lines = [f"🏥 {conv['hospital_label']} — {chosen_dept}", f"共 {len(doctors)} 位醫師，請選擇：\n"]
+        # 判斷每位醫師的看診狀態
+        def _doc_status(doc_name):
+            items = [r for r in filtered if r["doctor_name"] == doc_name]
+            if not items:
+                return ""
+            r = items[0]
+            cur = r.get("current_number", 0)
+            skipped = r.get("is_current_skipped", False)
+            room = r.get("clinic_room", "")
+            room_str = f"[{room}]" if room else ""
+            if skipped:
+                return f" {room_str} 目前{cur}號(過號) 📴"
+            elif cur > 0:
+                return f" {room_str} 目前{cur}號"
+            return f" {room_str}"
+
+        lines = [f"🏥 {conv['hospital_label']} — {chosen_dept}\n"]
         for i, doc in enumerate(doctors, 1):
             mark = " ⭐" if doc in doc_history else ""
-            lines.append(f"  {i}. {doc}{mark}")
+            status = _doc_status(doc)
+            lines.append(f"  {i}. {doc}{status}{mark}")
         lines.append(f"\n💡 輸入數字或醫師名")
         lines.append(f"💡 輸入 / 返回科別")
         lines.append(f"💡 輸入 @ 返回主選單")
@@ -1665,7 +1742,10 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
         return (
             f"🏥 {hospital_label}\n"
             f"⏰ {time_str}\n\n"
-            f"目前醫師休息中，請在看診時間再查詢"
+            f"目前沒有看診進度資料\n"
+            f"（可能尚未開診或資料更新中）\n\n"
+            f"💡 輸入「萬芳 下午 303診 8」可預先追蹤\n"
+            f"💡 輸入 p 設定預約追蹤"
         )
 
     # 解析 extra_filter 中的時段關鍵字
@@ -1681,7 +1761,12 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
     if session_filter:
         results = [r for r in results if r.get("session") == session_filter]
         if not results:
-            return f"🏥 {hospital_label}\n⏰ {time_str}\n\n{session_filter}目前沒有看診中的診間"
+            return (
+                f"🏥 {hospital_label}\n⏰ {time_str}\n\n"
+                f"{session_filter}目前沒有進度資料\n"
+                f"（可能尚未開診或醫師延診中）\n\n"
+                f"💡 可輸入「{hospital_label} {session_filter[:2]} 303診 8」預先追蹤"
+            )
 
     # 如果使用者已附帶篩選關鍵字（如「萬芳 骨科」），直接篩選並顯示
     if extra_filter:
@@ -1753,22 +1838,51 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
     dept_history = get_history_counts(user_id, hospital_code, field="department")
     dept_sorted = sort_by_history(dept_set, dept_history)
 
-    # 存入對話狀態
+    # 存入對話狀態（科別順序：看診中在前，可能結束在後）
     conv["state"] = "choose_dept"
     conv["hospital_code"] = hospital_code
     conv["hospital_label"] = hospital_label
     conv["results"] = results
-    conv["dept_list"] = dept_sorted
+
+    # 判斷每科的看診狀態
+    def _dept_status(dept):
+        """回傳 (活躍醫師數, 總醫師數, ��否全部過號)"""
+        items = [r for r in results if r["department"] == dept]
+        total = len(items)
+        all_skipped = all(r.get("is_current_skipped", False) for r in items)
+        return total, all_skipped
+
+    # 分成看診中���可能結束
+    active_depts = []
+    ended_depts = []
+    for dept in dept_sorted:
+        total, all_skipped = _dept_status(dept)
+        if all_skipped:
+            ended_depts.append((dept, total))
+        else:
+            active_depts.append((dept, total))
+
+    # dept_list 按顯示順序（看診中 → 可能結束）
+    conv["dept_list"] = [d for d, _ in active_depts] + [d for d, _ in ended_depts]
 
     lines = [
         f"🏥 {hospital_label}",
-        f"⏰ {time_str}　共 {len(results)} 個診間、{len(dept_sorted)} 個科別\n",
-        "請問您想看哪科？\n",
+        f"⏰ {time_str}\n",
     ]
-    for i, dept in enumerate(dept_sorted, 1):
-        count = len([r for r in results if r["department"] == dept])
-        mark = " ⭐" if dept in dept_history else ""
-        lines.append(f"  {i}. {dept}（{count}位醫師）{mark}")
+
+    if active_depts:
+        lines.append(f"看診中（{len(active_depts)} 科）：\n")
+        for i, (dept, count) in enumerate(active_depts, 1):
+            mark = " ⭐" if dept in dept_history else ""
+            lines.append(f"  {i}. {dept}（{count}位醫師）{mark}")
+
+    if ended_depts:
+        offset = len(active_depts)
+        lines.append(f"\n可能已結束（{len(ended_depts)} 科）：\n")
+        for i, (dept, count) in enumerate(ended_depts, offset + 1):
+            mark = " ⭐" if dept in dept_history else ""
+            lines.append(f"  {i}. {dept}（{count}位）📴{mark}")
+
     lines.append(f"\n💡 輸入數字或科別名稱")
     lines.append(f"💡 輸入 @ 返回主選單")
     return "\n".join(lines)

@@ -17,6 +17,8 @@ from app.services.cache import CacheService
 from app.services.tracker import TrackerService
 from app.services.line_bot import LineBotService
 from app.models.tracking_task import NotifyMode, LIGHT_NOTIFY_POINTS
+from app.models.tracking_feedback import TrackingFeedback
+from app.services.track_logger import log_message as track_log, get_log, clear_log
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +44,30 @@ class NotifierService:
 
         logger.info(f"[notifier] 檢查 {len(active_tasks)} 筆追蹤任務")
 
+        from datetime import datetime, timedelta
+        now = datetime.utcnow()
+
         for task, line_user_id in active_tasks:
             try:
+                # 預約追蹤超過 12 小時沒配到資料 → 自動提醒
+                if (task.last_notified_remaining is None
+                        and task.created_at
+                        and now - task.created_at > timedelta(hours=12)):
+                    from app.scrapers.registry import AdapterRegistry
+                    adapter = AdapterRegistry.get(task.hospital_code)
+                    hosp_name = adapter.hospital_name if adapter else task.hospital_code
+                    desc = f"{hosp_name} {task.department or ''} {task.doctor_name or ''}".strip()
+                    session_info = f"（{task.session}）" if task.session else ""
+                    message = (
+                        f"ℹ️ 預約追蹤提醒\n"
+                        f"{desc}{session_info}\n"
+                        f"已超過 12 小時未偵測到看診資料\n"
+                        f"請確認醫師是否有排診\n\n"
+                        f"輸入 t 查看追蹤 ｜ 輸入 c 取消"
+                    )
+                    await self._send_and_finish(task, line_user_id, message, "timeout")
+                    continue
+
                 await self._check_single_task(task, line_user_id)
             except Exception as e:
                 logger.error(f"[notifier] 檢查任務 {task.id} 失敗: {e}")
@@ -57,13 +81,34 @@ class NotifierService:
         )
 
         if not results:
-            return
+            # 有指定時段，再試不限時段
+            if task.session:
+                results = await self.cache.search_progress(
+                    hospital_code=task.hospital_code,
+                    department=task.department if task.department else None,
+                    doctor_name=task.doctor_name,
+                    clinic_room=task.clinic_room,
+                )
 
         # 有指定時段時，只匹配對應時段
-        if task.session:
+        if results and task.session:
             results = [r for r in results if r.session == task.session]
-            if not results:
-                return
+
+        if not results:
+            # 之前有資料現在沒了 → 醫生可能停診了
+            if task.last_notified_remaining is not None:
+                from app.scrapers.registry import AdapterRegistry
+                adapter = AdapterRegistry.get(task.hospital_code)
+                hosp_name = adapter.hospital_name if adapter else task.hospital_code
+                desc = f"{hosp_name} {task.department or ''} {task.doctor_name or ''} {task.clinic_room or ''}".strip()
+                message = (
+                    f"ℹ️ 看診進度已無資料\n"
+                    f"{desc}\n"
+                    f"醫師可能已結束看診或系統更新中\n\n"
+                    f"輸入 t 查看追蹤 ｜ 輸入 c 取消追蹤"
+                )
+                await self._send_and_finish(task, line_user_id, message, "doctor_gone")
+            return
 
         progress = results[0]
         current = progress.current_number
@@ -116,7 +161,7 @@ class NotifierService:
                 f"目前已看到第 {current} 號，您是第 {user_num} 號\n"
                 f"請儘速前往診間！"
             )
-            await self._send_and_finish(task, line_user_id, message)
+            await self._send_and_finish(task, line_user_id, message, "arrived")
             return
 
         # ========== 一般提醒 ==========
@@ -162,6 +207,7 @@ class NotifierService:
     async def _send(self, task, line_user_id: str, message: str, remaining: int):
         """發送通知，更新剩餘數，但不結束追蹤"""
         try:
+            track_log(task.id, "notify", message[:300])
             await self.line_bot.push_message(line_user_id, message)
             await self.tracker.update_last_remaining(task.id, remaining)
             logger.info(
@@ -170,11 +216,91 @@ class NotifierService:
         except Exception as e:
             logger.error(f"[notifier] 推播失敗 task={task.id}: {e}")
 
-    async def _send_and_finish(self, task, line_user_id: str, message: str):
-        """發送通知並標記完成"""
+    async def _send_and_finish(self, task, line_user_id: str, message: str, end_reason: str = "arrived"):
+        """發送通知、標記完成、建立回饋記錄、詢問用戶"""
         try:
+            track_log(task.id, "notify", message[:300])
             await self.line_bot.push_message(line_user_id, message)
             await self.tracker.mark_notified(task.id)
-            logger.info(f"[notifier] 已通知(結束) task={task.id}")
+
+            feedback_id = await self._create_feedback(task, line_user_id, message, end_reason)
+
+            if feedback_id:
+                await self.line_bot.push_message(line_user_id, (
+                    f"📋 追蹤結束，通知是否正確？\n\n"
+                    f"  0 — ✅ 正確\n"
+                    f"  1 — ❌ 有誤\n\n"
+                    f"（回覆 0 或 1，幫助我們改善）"
+                ))
+                from demo_chat import _conversations
+                _conversations[line_user_id] = {
+                    "state": "waiting_feedback",
+                    "feedback_id": feedback_id,
+                }
+
+            logger.info(f"[notifier] 已通知(結束) task={task.id} reason={end_reason} feedback={feedback_id}")
         except Exception as e:
             logger.error(f"[notifier] 推播失敗 task={task.id}: {e}")
+
+    async def _create_feedback(self, task, line_user_id: str, message: str, end_reason: str) -> int | None:
+        """建立回饋記錄，包含完整追蹤過程資訊"""
+        try:
+            from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+            from app.config import settings
+            from app.scrapers.registry import AdapterRegistry
+
+            eng = create_async_engine(settings.database_url, echo=False)
+            sess = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
+
+            # 取得結束時的看診號碼
+            results = await self.cache.search_progress(
+                hospital_code=task.hospital_code,
+                department=task.department if task.department else None,
+                doctor_name=task.doctor_name,
+                clinic_room=task.clinic_room,
+            )
+            final_current = results[0].current_number if results else 0
+
+            # 醫院名稱
+            adapter = AdapterRegistry.get(task.hospital_code)
+            hosp_name = adapter.hospital_name if adapter else task.hospital_code
+
+            # 計算通知次數（從 last_notified_remaining 推算）
+            notify_count = 0
+            if task.last_notified_remaining is not None:
+                notify_count = max(1, (task.threshold or 5) - (task.last_notified_remaining or 0))
+
+            # 取得對話記錄
+            conv_log = get_log(task.id)
+
+            async with sess() as session:
+                fb = TrackingFeedback(
+                    task_id=task.id,
+                    line_user_id=line_user_id,
+                    hospital_code=task.hospital_code,
+                    hospital_name=hosp_name,
+                    department=task.department or "",
+                    doctor_name=task.doctor_name or "",
+                    clinic_room=task.clinic_room or "",
+                    session=task.session or "",
+                    user_number=task.user_number,
+                    notify_mode=task.notify_mode or "light",
+                    track_created_at=task.created_at,
+                    start_current=None,
+                    final_current=final_current,
+                    notify_count=notify_count,
+                    final_message=message,
+                    end_reason=end_reason,
+                    conversation_log=conv_log,
+                )
+                session.add(fb)
+                await session.commit()
+                await session.refresh(fb)
+                feedback_id = fb.id
+
+            await eng.dispose()
+            clear_log(task.id)
+            return feedback_id
+        except Exception as e:
+            logger.error(f"[notifier] 建立回饋失敗: {e}")
+            return None
