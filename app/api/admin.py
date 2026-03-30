@@ -557,6 +557,8 @@ th.sortable span { font-size:10px; }
     <button id="tabHospitals" onclick="switchTab('hospitals')">醫院管理</button>
     <button id="tabShortcuts" onclick="switchTab('shortcuts')">快捷指令</button>
     <button id="tabFeedback" onclick="switchTab('feedback')">回饋記錄</button>
+    <button id="tabTest" onclick="switchTab('test')">系統測試</button>
+    <button id="tabLive" onclick="switchTab('live')">即時追蹤測試</button>
     <button class="logout" onclick="doLogout()">登出</button>
   </div>
 </div>
@@ -628,6 +630,140 @@ th.sortable span { font-size:10px; }
   </div>
 </div>
 
+<!-- 即時追蹤測試頁 -->
+<div class="container hidden" id="pageLive">
+  <h2 style="font-size:16px;margin:0 0 12px;">即時追蹤測試</h2>
+  <p style="font-size:13px;color:#666;margin-bottom:12px;">用假用戶追蹤正在看診的真實醫師，驗證通知是否正確觸發。掛號號碼 = 目前號碼 + 偏移量。</p>
+  <div style="display:flex;gap:16px;align-items:center;margin-bottom:16px;flex-wrap:wrap;">
+    <label style="font-size:13px;">追蹤數量 <select id="liveCount" style="padding:4px;border:1px solid #ddd;border-radius:4px;">
+      <option value="3">3</option><option value="5" selected>5</option><option value="10">10</option><option value="15">15</option>
+    </select></label>
+    <label style="font-size:13px;">號碼偏移 <select id="liveOffset" style="padding:4px;border:1px solid #ddd;border-radius:4px;">
+      <option value="1">+1（快到號）</option><option value="3" selected>+3</option><option value="5">+5</option><option value="10">+10</option>
+    </select></label>
+    <label style="font-size:13px;">提醒模式 <select id="liveMode" style="padding:4px;border:1px solid #ddd;border-radius:4px;">
+      <option value="normal">📢 每號</option><option value="light">🔔 輕量</option><option value="final">🔕 最後</option>
+    </select></label>
+    <button id="btnLiveStart" onclick="startLiveTest()" style="padding:8px 20px;border:none;border-radius:6px;background:#4a90d9;color:#fff;cursor:pointer;font-size:14px;">▶ 開始追蹤</button>
+    <button id="btnLiveCheck" onclick="checkLiveTest()" style="padding:8px 16px;border:1px solid #4a90d9;border-radius:6px;background:#fff;color:#4a90d9;cursor:pointer;font-size:13px;">🔄 刷新</button>
+    <button id="btnLiveStop" onclick="stopLiveTest()" style="padding:8px 16px;border:1px solid #e74c3c;border-radius:6px;background:#fff;color:#e74c3c;cursor:pointer;font-size:13px;display:none;">⏹ 停止</button>
+  </div>
+  <div id="liveStatus" style="margin-bottom:12px;font-size:13px;color:#888;"></div>
+  <div class="table-wrap">
+    <table><thead><tr>
+      <th>醫院</th><th>科別</th><th>醫師</th><th>診間</th><th>時段</th>
+      <th>掛號</th><th>開始時號碼</th><th>目前號碼</th><th>剩餘</th><th>狀態</th>
+    </tr></thead><tbody id="liveBody"></tbody></table>
+  </div>
+</div>
+
+<!-- 系統測試頁 -->
+<div class="container hidden" id="pageTest">
+  <h2 style="font-size:16px;margin:0 0 16px;">系統測試</h2>
+
+  <!-- 設定區 -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+    <!-- 左：環境 + 醫院 -->
+    <div style="background:#f8f9ff;border-radius:8px;padding:16px;">
+      <b>環境狀態</b>
+      <div id="testEnv" style="font-size:13px;color:#666;margin-top:8px;">載入中...</div>
+      <div style="margin-top:12px;">
+        <b>醫院選擇</b>
+        <div style="margin-top:4px;display:flex;gap:8px;align-items:center;">
+          <label style="font-size:13px;"><input type="checkbox" id="testAllHospitals" checked onchange="toggleAllHospitals()"> 全部</label>
+        </div>
+        <div id="testHospitalList" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;font-size:12px;"></div>
+      </div>
+    </div>
+
+    <!-- 右：劇本 + 參數 -->
+    <div style="background:#f8f9ff;border-radius:8px;padding:16px;">
+      <b>測試劇本</b>
+      <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;font-size:13px;" id="testScenarioTypes">
+        <label><input type="checkbox" value="query" checked> 查詢醫院</label>
+        <label><input type="checkbox" value="filter" checked> 科別篩選</label>
+        <label><input type="checkbox" value="quick_track" checked> 快速追蹤</label>
+        <label><input type="checkbox" value="pretrack" checked> 預約追蹤</label>
+        <label><input type="checkbox" value="shortcut" checked> 快捷指令</label>
+        <label><input type="checkbox" value="edge" checked> 邊界測試</label>
+      </div>
+      <div style="margin-top:12px;">
+        <b>測試模式</b>
+        <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:8px;font-size:13px;">
+          <label><input type="radio" name="testMode" value="standard" checked> 標準（每院基本流程）</label>
+          <label><input type="radio" name="testMode" value="random"> 隨機（隨機醫師/科別）</label>
+          <label><input type="radio" name="testMode" value="deep"> 深度（每院每科都測）</label>
+          <label><input type="radio" name="testMode" value="all"> 全部（標準+隨機+深度）</label>
+        </div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:16px;align-items:center;">
+        <div>
+          <b>隨機測試數</b>
+          <select id="testRandomCount" style="margin-left:8px;padding:4px 8px;border:1px solid #ddd;border-radius:4px;">
+            <option value="10">10</option>
+            <option value="20" selected>20</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </div>
+        <div>
+          <b>最大並發</b>
+          <select id="testMaxConcurrent" style="margin-left:8px;padding:4px 8px;border:1px solid #ddd;border-radius:4px;">
+            <option value="30">30</option>
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+            <option value="200">200</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:16px;border-top:1px solid #e0e0e0;padding-top:12px;">
+        <b>排程設定</b>
+        <div style="margin-top:8px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:13px;">
+          <label>開始 <input type="time" id="testStartTime" value="08:30" style="padding:4px;border:1px solid #ddd;border-radius:4px;"></label>
+          <label>結束 <input type="time" id="testEndTime" value="12:00" style="padding:4px;border:1px solid #ddd;border-radius:4px;"></label>
+          <label>間隔 <select id="testInterval" style="padding:4px;border:1px solid #ddd;border-radius:4px;">
+            <option value="1">1 分鐘</option>
+            <option value="3">3 分鐘</option>
+            <option value="5" selected>5 分鐘</option>
+            <option value="10">10 分鐘</option>
+            <option value="30">30 分鐘</option>
+            <option value="60">60 分鐘</option>
+          </select></label>
+          <div style="display:flex;gap:4px;">
+            <button onclick="setTimePreset('morning')" style="padding:2px 8px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer;font-size:12px;">上午診</button>
+            <button onclick="setTimePreset('afternoon')" style="padding:2px 8px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer;font-size:12px;">下午診</button>
+            <button onclick="setTimePreset('night')" style="padding:2px 8px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer;font-size:12px;">夜診</button>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
+        <button id="btnRunTest" onclick="runTest()" style="padding:10px 28px;border:none;border-radius:6px;background:#4a90d9;color:#fff;cursor:pointer;font-size:14px;font-weight:600;">▶ 立即測試</button>
+        <button id="btnSchedule" onclick="scheduleTest()" style="padding:10px 28px;border:none;border-radius:6px;background:#27ae60;color:#fff;cursor:pointer;font-size:14px;font-weight:600;">⏰ 排程測試</button>
+        <button id="btnCancelSchedule" onclick="cancelSchedule()" style="padding:10px 20px;border:1px solid #e74c3c;border-radius:6px;background:#fff;color:#e74c3c;cursor:pointer;font-size:13px;display:none;">取消排程</button>
+        <span id="testRunning" style="display:none;margin-left:8px;font-size:13px;color:#888;">⏳ 測試中...</span>
+        <span id="scheduleStatus" style="margin-left:8px;font-size:13px;color:#27ae60;"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 結果區 -->
+  <div id="testReport" style="display:none;">
+    <div id="testSummary" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin-bottom:16px;"></div>
+    <div id="testFails" style="margin-bottom:16px;"></div>
+    <div style="margin-bottom:8px;font-size:13px;color:#888;">
+      <label><input type="checkbox" id="testShowOnlyFails" onchange="filterTestResults()"> 只顯示失敗</label>
+    </div>
+    <div class="table-wrap">
+      <table><thead><tr>
+        <th>#</th><th>劇本</th><th>步驟</th><th>輸入</th><th>結果</th><th>耗時</th><th>回覆預覽</th>
+      </tr></thead><tbody id="testBody"></tbody></table>
+    </div>
+  </div>
+
+  <!-- 歷史 -->
+  <div id="testHistory" style="margin-top:24px;"></div>
+</div>
+
 <!-- 快捷指令頁 -->
 <div class="container hidden" id="pageShortcuts">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
@@ -695,7 +831,7 @@ async function doLogout() {
 // ===== 切頁 =====
 function switchTab(tab) {
   currentTab = tab;
-  for (const p of ['Stats','Hospitals','Shortcuts','Feedback']) {
+  for (const p of ['Stats','Hospitals','Shortcuts','Feedback','Test','Live']) {
     document.getElementById('page'+p).classList.toggle('hidden', tab !== p.toLowerCase());
     document.getElementById('tab'+p).classList.toggle('active', tab === p.toLowerCase());
   }
@@ -703,6 +839,8 @@ function switchTab(tab) {
   if (tab === 'hospitals') loadHospitals();
   if (tab === 'shortcuts') loadShortcuts();
   if (tab === 'feedback') loadFeedback();
+  if (tab === 'test') loadTestEnv();
+  if (tab === 'live') checkLiveTest();
 }
 
 // ===== 統計 =====
@@ -975,6 +1113,376 @@ async function saveEdit() {
     }
   } catch(e) {}
 })();
+// ===== 系統測試 =====
+let _testStatusData = null;
+let _lastTestData = null;
+let _testReportsData = [];
+
+let _testReportsSortAsc = false;
+function sortTestReports() {
+  if (!_testReportsData.length) return;
+  _testReportsSortAsc = !_testReportsSortAsc;
+  _testReportsData.sort((a, b) => {
+    const aHas = (a.conversations && a.conversations.length > 0) ? 1 : 0;
+    const bHas = (b.conversations && b.conversations.length > 0) ? 1 : 0;
+    return _testReportsSortAsc ? aHas - bHas : bHas - aHas;
+  });
+  // re-render
+  renderTestHistory(_testReportsData);
+}
+
+function renderTestHistory(reports) {
+  const tbody = document.getElementById('testHistoryBody');
+  if (!tbody) return;
+  tbody.innerHTML = reports.map((r, ri) => {
+    const failItems = (r.failed_items||[]).map(f => f.scenario+': '+f.input).join(', ');
+    const hasConv = r.conversations && r.conversations.length > 0;
+    return '<tr'+ ((r.failed_steps||r.failed||0)>0?' style="background:#fff5f5;"':'') +'>' +
+      '<td style="padding:4px;">'+(r.id||'')+'</td>' +
+      '<td style="white-space:nowrap">'+r.start_time+'</td>' +
+      '<td style="white-space:nowrap">'+r.end_time+'</td>' +
+      '<td>'+r.session_hint+'</td>' +
+      '<td style="font-size:11px">'+(r.hospitals_with_data||'')+'家</td>' +
+      '<td style="color:green;">✅'+(r.passed_steps||r.passed||0)+'</td>' +
+      '<td style="color:'+((r.failed_steps||r.failed||0)>0?'red':'gray')+';">'+((r.failed_steps||r.failed||0)>0?'❌':'')+(r.failed_steps||r.failed||0)+'</td>' +
+      '<td>'+(r.avg_step_time||r.avg_time||0)+'s</td>' +
+      '<td style="font-size:11px;max-width:200px;word-break:break-all;">'+(failItems||'✅')+'</td>' +
+      '<td>'+(hasConv?'<button onclick="showTestConv('+ri+')" style="padding:2px 8px;border:1px solid #4a90d9;border-radius:4px;background:#fff;color:#4a90d9;cursor:pointer;font-size:11px;">查看('+r.conversations.length+')</button>':'—')+'</td></tr>';
+  }).join('');
+}
+
+function showTestConv(reportIdx) {
+  const r = _testReportsData[reportIdx];
+  if (!r || !r.conversations) return;
+  const convs = r.conversations;
+  let html = '';
+  for (const c of convs) {
+    const badge = c.passed ? '✅' : '❌';
+    html += `<div style="margin-bottom:16px;">`;
+    html += `<div style="text-align:center;margin:8px 0;"><span style="background:${c.passed?'#e8f5e9':'#ffebee'};padding:4px 16px;border-radius:12px;font-size:12px;font-weight:600;">${badge} ${c.scenario}</span></div>`;
+    for (const s of c.steps) {
+      const icon = s.ok ? '✅' : '❌';
+      // 用戶訊息（右邊，綠色）
+      html += `<div style="display:flex;justify-content:flex-end;margin:4px 0;">
+        <div style="background:#DCF8C6;padding:8px 12px;border-radius:12px 12px 0 12px;max-width:75%;font-size:13px;word-break:break-all;">
+          ${s.input}
+          <div style="font-size:10px;color:#888;text-align:right;margin-top:2px;">${s.elapsed}s</div>
+        </div>
+      </div>`;
+      // 系統回覆（左邊，白色）
+      const replyBorder = s.ok ? '' : 'border:1px solid #ffcdd2;';
+      html += `<div style="display:flex;justify-content:flex-start;margin:4px 0;">
+        <div style="background:#fff;${replyBorder}padding:8px 12px;border-radius:12px 12px 12px 0;max-width:75%;font-size:13px;box-shadow:0 1px 2px rgba(0,0,0,.08);word-break:break-all;">
+          ${s.reply.replace(/\\n/g,'<br>')}
+          <div style="font-size:10px;color:#888;margin-top:2px;">${icon}</div>
+        </div>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  overlay.innerHTML = `<div style="background:#E5DDD5;border-radius:12px;max-width:500px;width:95%;max-height:90vh;overflow-y:auto;display:flex;flex-direction:column;">
+    <div style="background:#075E54;color:#fff;padding:12px 16px;border-radius:12px 12px 0 0;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;">
+      <b>測試對話 #${r.id} (${r.start_time})</b>
+      <button onclick="this.closest('div[style*=fixed]').remove()" style="border:none;background:none;color:#fff;font-size:18px;cursor:pointer;">✕</button>
+    </div>
+    <div style="padding:12px;flex:1;">
+      ${html}
+    </div>
+  </div>`;
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+
+async function loadTestEnv() {
+  try {
+    const r = await fetch('/admin/api/test/status');
+    if (r.status === 401) { location.reload(); return; }
+    const d = await r.json();
+    _testStatusData = d;
+
+    document.getElementById('testEnv').innerHTML =
+      `🏥 有資料：${d.hospitals.length} 家，共 ${d.hospitals.reduce((a,h)=>a+h.rooms,0)} 個診間<br>` +
+      `📋 可產生劇本：${d.total_scenarios} 個`;
+
+    // 醫院勾選
+    const list = document.getElementById('testHospitalList');
+    list.innerHTML = d.hospitals.map(h =>
+      `<label style="background:#fff;padding:2px 8px;border-radius:4px;border:1px solid #ddd;cursor:pointer;">` +
+      `<input type="checkbox" class="test-hosp-cb" value="${h.name}" checked> ${h.name}(${h.rooms})</label>`
+    ).join('');
+
+    // 歷史
+    const r2 = await fetch('/admin/api/test/reports');
+    const reports = await r2.json();
+    _testReportsData = reports;
+    if (reports.length) {
+      document.getElementById('testHistory').innerHTML =
+        '<h3 style="font-size:14px;margin-bottom:8px;">歷史報告</h3>' +
+        '<table style="width:100%;font-size:12px;border-collapse:collapse;"><thead><tr>' +
+        '<th style="text-align:left;padding:4px;">#</th><th>開始</th><th>結束</th><th>時段</th><th>醫院</th><th>通過</th><th>失敗</th><th>均耗時</th><th>失敗項</th><th style="cursor:pointer" onclick="sortTestReports()">對話 ⇅</th></tr></thead><tbody id="testHistoryBody"></tbody></table>';
+      renderTestHistory(reports);
+    }
+    checkScheduleStatus();
+  } catch(e) { console.error(e); }
+}
+
+function toggleAllHospitals() {
+  const checked = document.getElementById('testAllHospitals').checked;
+  document.querySelectorAll('.test-hosp-cb').forEach(cb => cb.checked = checked);
+}
+
+function filterTestResults() {
+  if (!_lastTestData) return;
+  renderTestResults(_lastTestData);
+}
+
+function renderTestResults(d) {
+  const onlyFails = document.getElementById('testShowOnlyFails').checked;
+  let rowIdx = 0;
+  const rows = [];
+  d.results.forEach(r => {
+    r.steps.forEach((s, si) => {
+      rowIdx++;
+      if (onlyFails && s.ok) return;
+      const bg = s.ok ? '' : 'background:#fff5f5;';
+      const badge = s.ok ? '<span class="badge badge-green">✅</span>' : '<span class="badge badge-red">❌</span>';
+      rows.push(`<tr style="${bg}">
+        <td>${rowIdx}</td>
+        <td>${r.scenario}</td>
+        <td>${si+1}/${r.steps.length}</td>
+        <td><code>${s.input}</code></td>
+        <td>${badge}</td>
+        <td>${s.elapsed}s</td>
+        <td style="font-size:11px;max-width:300px;word-break:break-all;">${s.reply_preview || ''}</td>
+      </tr>`);
+    });
+  });
+  document.getElementById('testBody').innerHTML = rows.join('');
+}
+
+async function runTest() {
+  const btn = document.getElementById('btnRunTest');
+  btn.disabled = true;
+  document.getElementById('testRunning').style.display = 'inline';
+  document.getElementById('testReport').style.display = 'none';
+
+  // 收集參數
+  const selectedHospitals = [...document.querySelectorAll('.test-hosp-cb:checked')].map(cb => cb.value);
+  const selectedTypes = [...document.querySelectorAll('#testScenarioTypes input:checked')].map(cb => cb.value);
+  const usersPerScenario = parseInt(document.getElementById('testUsersPerScenario').value);
+  const maxConcurrent = parseInt(document.getElementById('testMaxConcurrent').value);
+
+  try {
+    const r = await fetch('/admin/api/test/run', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        hospitals: selectedHospitals,
+        scenario_types: selectedTypes,
+        users_per_scenario: usersPerScenario,
+        max_concurrent: maxConcurrent,
+      }),
+    });
+    const d = await r.json();
+    _lastTestData = d;
+    if (d.error) { alert(d.error); return; }
+
+    // Summary cards
+    const cards = [
+      {num: `${d.start_time}`, label: '開始時間', color: '#333'},
+      {num: `${d.end_time}`, label: '結束時間', color: '#333'},
+      {num: `${d.total_elapsed}s`, label: '總耗時', color: '#4a90d9'},
+      {num: d.session_hint, label: '時段', color: '#888'},
+      {num: `${d.passed_steps}/${d.total_steps}`, label: '通過/總步驟', color: '#27ae60'},
+      {num: `${d.failed_steps}`, label: '失敗', color: d.failed_steps > 0 ? '#e74c3c' : '#27ae60'},
+      {num: `${d.avg_step_time}s`, label: '平均耗時/步', color: '#4a90d9'},
+      {num: d.data_summary, label: 'Redis 資料', color: '#888'},
+    ];
+    document.getElementById('testSummary').innerHTML = cards.map(c =>
+      `<div class="stat-card"><div class="num" style="font-size:18px;color:${c.color}">${c.num}</div><div class="label">${c.label}</div></div>`
+    ).join('');
+
+    // Failed steps highlight
+    const fails = [];
+    d.results.forEach(r => r.steps.forEach(s => { if (!s.ok) fails.push({...s, scenario: r.scenario}); }));
+    if (fails.length) {
+      document.getElementById('testFails').innerHTML =
+        '<div style="background:#fff5f5;border:1px solid #fcc;border-radius:8px;padding:12px;margin-bottom:8px;">' +
+        '<b style="color:#e74c3c;">❌ 失敗項目</b><br>' +
+        fails.map(f => `<div style="margin-top:6px;font-size:13px;">
+          <b>${f.scenario}</b> → 輸入「${f.input}」<br>
+          預期含：${f.expected.join('/')}<br>
+          實際：${f.reply_preview}
+        </div>`).join('<hr style="margin:4px 0;">') + '</div>';
+    } else {
+      document.getElementById('testFails').innerHTML =
+        '<div style="background:#f0fff0;border:1px solid #cfc;border-radius:8px;padding:12px;text-align:center;">✅ 全部通過！</div>';
+    }
+
+    renderTestResults(d);
+    document.getElementById('testReport').style.display = 'block';
+    loadTestEnv();
+  } catch(e) {
+    alert('測試執行失敗: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    document.getElementById('testRunning').style.display = 'none';
+  }
+}
+
+function setTimePreset(preset) {
+  const presets = {
+    morning:   {start:'08:30', end:'12:00'},
+    afternoon: {start:'13:30', end:'17:00'},
+    night:     {start:'18:00', end:'21:00'},
+  };
+  const p = presets[preset];
+  if (p) {
+    document.getElementById('testStartTime').value = p.start;
+    document.getElementById('testEndTime').value = p.end;
+  }
+}
+
+function _getTestParams() {
+  return {
+    hospitals: [...document.querySelectorAll('.test-hosp-cb:checked')].map(cb => cb.value),
+    scenario_types: [...document.querySelectorAll('#testScenarioTypes input:checked')].map(cb => cb.value),
+    test_mode: document.querySelector('input[name=testMode]:checked')?.value || 'standard',
+    random_count: parseInt(document.getElementById('testRandomCount').value),
+    users_per_scenario: 1,
+    max_concurrent: parseInt(document.getElementById('testMaxConcurrent').value),
+    start_time: document.getElementById('testStartTime').value,
+    end_time: document.getElementById('testEndTime').value,
+    interval_minutes: parseInt(document.getElementById('testInterval').value),
+  };
+}
+
+async function scheduleTest() {
+  const params = _getTestParams();
+  try {
+    const r = await fetch('/admin/api/test/schedule', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(params),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      document.getElementById('scheduleStatus').textContent = `✅ 已排程：${params.start_time} ~ ${params.end_time}，每 ${params.interval_minutes} 分鐘`;
+      document.getElementById('btnCancelSchedule').style.display = 'inline';
+      loadTestEnv();
+    } else {
+      alert(d.error || '排程失敗');
+    }
+  } catch(e) { alert('排程失敗: ' + e.message); }
+}
+
+async function cancelSchedule() {
+  try {
+    await fetch('/admin/api/test/schedule', {method:'DELETE'});
+    document.getElementById('scheduleStatus').textContent = '已取消排程';
+    document.getElementById('btnCancelSchedule').style.display = 'none';
+    setTimeout(() => document.getElementById('scheduleStatus').textContent = '', 3000);
+  } catch(e) {}
+}
+
+// 檢查排程狀態
+async function checkScheduleStatus() {
+  try {
+    const r = await fetch('/admin/api/test/schedule');
+    const d = await r.json();
+    if (d.active) {
+      document.getElementById('scheduleStatus').textContent =
+        `⏰ 排程中：${d.start_time} ~ ${d.end_time}，每 ${d.interval}分，已跑 ${d.runs_done} 次`;
+      document.getElementById('btnCancelSchedule').style.display = 'inline';
+    }
+  } catch(e) {}
+}
+
+// ===== 即時追蹤測試 =====
+let _liveAutoRefresh = null;
+
+async function startLiveTest() {
+  try {
+    const r = await fetch('/admin/api/test/live/start', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        count: parseInt(document.getElementById('liveCount').value),
+        offset: parseInt(document.getElementById('liveOffset').value),
+        notify_mode: document.getElementById('liveMode').value,
+      }),
+    });
+    const d = await r.json();
+    if (d.error) { alert(d.error); return; }
+    renderLiveTest(d);
+    document.getElementById('btnLiveStop').style.display = 'inline';
+    // 每 30 秒自動刷新
+    if (_liveAutoRefresh) clearInterval(_liveAutoRefresh);
+    _liveAutoRefresh = setInterval(checkLiveTest, 30000);
+  } catch(e) { alert(e.message); }
+}
+
+async function checkLiveTest() {
+  try {
+    const r = await fetch('/admin/api/test/live/check', {method:'POST'});
+    const d = await r.json();
+    renderLiveTest(d);
+    if (d.status === 'completed' || d.status === 'stopped' || d.status === 'idle') {
+      if (_liveAutoRefresh) { clearInterval(_liveAutoRefresh); _liveAutoRefresh = null; }
+      document.getElementById('btnLiveStop').style.display = 'none';
+    } else {
+      document.getElementById('btnLiveStop').style.display = 'inline';
+      if (!_liveAutoRefresh) _liveAutoRefresh = setInterval(checkLiveTest, 30000);
+    }
+  } catch(e) {}
+}
+
+async function stopLiveTest() {
+  if (!confirm('確定停止即時測試？')) return;
+  await fetch('/admin/api/test/live/stop', {method:'POST'});
+  if (_liveAutoRefresh) { clearInterval(_liveAutoRefresh); _liveAutoRefresh = null; }
+  document.getElementById('btnLiveStop').style.display = 'none';
+  checkLiveTest();
+}
+
+function renderLiveTest(d) {
+  const statusMap = {ACTIVE:'⏳ 追蹤中', NOTIFIED:'✅ 已通知', CANCELLED:'🚫 取消', completed:'✅ 完成', stopped:'⏹ 已停止', idle:'💤 閒置', running:'🔄 進行中'};
+  document.getElementById('liveStatus').innerHTML =
+    `狀態：<b>${statusMap[d.status]||d.status}</b>` +
+    (d.started_at ? ` ｜ 開始：${d.started_at}` : '') +
+    (d.completed_at ? ` ｜ 完成：${d.completed_at}` : '') +
+    (d.stopped_at ? ` ｜ 停止：${d.stopped_at}` : '');
+
+  const tbody = document.getElementById('liveBody');
+  const tasks = d.tasks || [];
+  if (!tasks.length) {
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#888;padding:20px;">尚無追蹤任務</td></tr>';
+    return;
+  }
+  tbody.innerHTML = tasks.map(t => {
+    const st = t.status || 'ACTIVE';
+    const stBadge = st === 'NOTIFIED' ? '<span class="badge badge-green">✅ 已通知</span>'
+      : st === 'ACTIVE' ? '<span class="badge badge-blue">⏳ 追蹤中</span>'
+      : '<span class="badge badge-gray">' + st + '</span>';
+    const remaining = t.remaining !== undefined && t.remaining !== '?' ? t.remaining : '?';
+    const curNow = t.current_now !== undefined ? t.current_now : '?';
+    const rowBg = st === 'NOTIFIED' ? 'background:#f0fff0;' : remaining !== '?' && remaining <= 0 ? 'background:#fff5f5;' : '';
+    return `<tr style="${rowBg}">
+      <td>${t.hospital}</td>
+      <td>${t.department}</td>
+      <td>${t.doctor}</td>
+      <td>${t.room||'-'}</td>
+      <td>${t.session||'-'}</td>
+      <td><b>${t.user_number}號</b></td>
+      <td>${t.start_current}號</td>
+      <td><b>${curNow}${curNow !== '?' && curNow !== 'N/A' ? '號' : ''}</b></td>
+      <td>${remaining}</td>
+      <td>${stBadge}</td>
+    </tr>`;
+  }).join('');
+}
+
 // ===== 對話記錄 Modal =====
 function showConvLog(logJson, feedbackId) {
   try {

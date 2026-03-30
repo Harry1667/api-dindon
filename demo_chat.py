@@ -1044,23 +1044,40 @@ def _format_results(results: list[dict], hospital_label: str,
 
 def _load_shortcuts() -> dict[str, str]:
     """從 Redis 讀取快捷指令對照表 {trigger: action}，觸發詞支援逗號分隔多個"""
+    # 內建預設（確保即使 Redis 沒有也能用）
+    builtin = {
+        "@": "返回", "0": "返回", "#": "返回", "主選單": "返回",
+        "00": "醫院", "列表": "醫院",
+        "h": "說明", "help": "說明", "說明": "說明", "幫助": "說明",
+        "t": "我的追蹤", "追蹤": "我的追蹤",
+        "c": "取消追蹤", "停止追蹤": "取消追蹤",
+        "p": "預約追蹤", "預約": "預約追蹤",
+    }
     try:
         data = _redis_client.get("config:shortcuts")
         if data:
             import json
             items = json.loads(data)
-            result = {}
             for s in items:
                 if not s.get("trigger") or not s.get("action"):
                     continue
                 for t in s["trigger"].split(","):
                     t = t.strip().lower()
                     if t:
-                        result[t] = s["action"]
-            return result
+                        builtin[t] = s["action"]
     except Exception:
         pass
-    return {}
+    return builtin
+
+
+def _make_local_tracker():
+    """建立使用獨立 engine 的 TrackerService（避免 event loop 問題）"""
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+    from app.services.tracker import TrackerService
+    from app.config import settings as _s
+    eng = create_async_engine(_s.database_url, echo=False, pool_size=1)
+    sess = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
+    return TrackerService(session_factory=sess)
 
 
 async def _handle_feedback(msg: str, user_id: str, conv: dict) -> str:
@@ -1104,16 +1121,18 @@ async def _save_feedback(feedback_id: int | None, is_correct: bool, comment: str
         from app.config import settings
         from app.models.tracking_feedback import TrackingFeedback
 
-        eng = create_async_engine(settings.database_url, echo=False)
+        eng = create_async_engine(settings.database_url, echo=False, pool_size=1)
         sess = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
-        async with sess() as session:
-            await session.execute(
-                update(TrackingFeedback)
-                .where(TrackingFeedback.id == feedback_id)
-                .values(is_correct=is_correct, user_comment=comment)
-            )
-            await session.commit()
-        await eng.dispose()
+        try:
+            async with sess() as session:
+                await session.execute(
+                    update(TrackingFeedback)
+                    .where(TrackingFeedback.id == feedback_id)
+                    .values(is_correct=is_correct, user_comment=comment)
+                )
+                await session.commit()
+        finally:
+            await eng.dispose()
     except Exception as e:
         import logging
         logging.getLogger(__name__).error(f"儲存回饋失敗: {e}")
@@ -1209,19 +1228,27 @@ async def _handle_pretrack_in_chat(msg: str, user_id: str, conv: dict) -> str:
         user_number = conv["pretrack_number"]
         reset_conv(user_id)
 
+        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
         from app.services.tracker import TrackerService
         from app.scrapers.registry import AdapterRegistry
-        tracker = TrackerService()
-        await tracker.create_task(
-            line_user_id=user_id,
-            hospital_code=hospital_code,
-            department=dept,
-            doctor_name=doctor or None,
-            clinic_room=clinic_room,
-            user_number=user_number,
-            notify_mode=mode,
-            session_time=session_time or None,
-        )
+        from app.config import settings as _settings
+
+        _eng = create_async_engine(_settings.database_url, echo=False, pool_size=1)
+        _sess = async_sessionmaker(_eng, class_=AsyncSession, expire_on_commit=False)
+        tracker = TrackerService(session_factory=_sess)
+        try:
+            await tracker.create_task(
+                line_user_id=user_id,
+                hospital_code=hospital_code,
+                department=dept,
+                doctor_name=doctor or None,
+                clinic_room=clinic_room,
+                user_number=user_number,
+                notify_mode=mode,
+                session_time=session_time or None,
+            )
+        finally:
+            await _eng.dispose()
 
         adapter = AdapterRegistry.get(hospital_code)
         hosp_name = adapter.hospital_name if adapter else hospital
@@ -1297,15 +1324,16 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
 
     # 我的追蹤 / 追蹤狀態
     if msg in ("我的追蹤", "追蹤列表", "追蹤狀態"):
-        # 讀取 Redis 裡的追蹤資料（透過 LineBotService）
         from app.services.line_bot import LineBotService
         svc = LineBotService()
+        svc.tracker = _make_local_tracker()
         return await svc._handle_list_tracks(user_id)
 
     # 取消追蹤
     if msg in ("取消追蹤", "停止追蹤"):
         from app.services.line_bot import LineBotService
         svc = LineBotService()
+        svc.tracker = _make_local_tracker()
         return await svc._handle_cancel_track(user_id, msg)
 
     # 追蹤回饋
@@ -1687,9 +1715,11 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
 
     hospital_code, hospital_label, extra_filter = resolved
 
-    # 快速追蹤：「萬芳 下午 303診 8號」或「萬芳 303診 8」（不需要查資料）
-    if extra_filter and re.search(r"\d+診", extra_filter) and re.search(r"\d+號?$", extra_filter.rstrip("號")):
-        m_room = re.search(r"(\d+診)", extra_filter)
+    # 快速追蹤：「萬芳 下午 303診 8號」「萬芳 診室147 999」（不需要查資料）
+    # 匹配：含診間號（\d+診 或 診室\d+ 或 診間\d+）且結尾有數字
+    room_pattern = r"(\d+診|診室\d+|診間\d+)"
+    if extra_filter and re.search(room_pattern, extra_filter) and re.search(r"(\d+)\s*號?\s*$", extra_filter):
+        m_room = re.search(room_pattern, extra_filter)
         m_num = re.search(r"(\d+)\s*號?\s*$", extra_filter)
         if m_room and m_num:
             clinic_room = m_room.group(1)

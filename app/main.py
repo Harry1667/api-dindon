@@ -11,6 +11,8 @@ load_dotenv()
 from app.config import settings
 from app.api.webhook import router as webhook_router
 from app.api.admin import router as admin_router
+from app.api.test_harness import router as test_router
+from app.api.live_test import router as live_test_router
 from app.models.database import engine, Base
 
 # 確保所有 Model 都被 import，create_all 才能建立資料表
@@ -410,6 +412,8 @@ app = FastAPI(
 # 註冊路由
 app.include_router(webhook_router)
 app.include_router(admin_router)
+app.include_router(test_router)
+app.include_router(live_test_router)
 
 
 @app.get("/health")

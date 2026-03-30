@@ -31,7 +31,7 @@ celery_app.conf.update(
     task_time_limit=660,
 
     # 自動發現任務
-    include=["app.tasks.scrape", "app.tasks.notify", "app.tasks.nhi_sync", "app.tasks.sync_master_data"],
+    include=["app.tasks.scrape", "app.tasks.notify", "app.tasks.nhi_sync", "app.tasks.sync_master_data", "app.tasks.test_scheduler"],
 
     # 定時排程 (Celery Beat)
     beat_schedule={
@@ -54,6 +54,11 @@ celery_app.conf.update(
         "sync-master-data-daily": {
             "task": "app.tasks.sync_master_data.sync_master_data",
             "schedule": crontab(hour=4, minute=0),
+        },
+        # 每分鐘檢查排程測試
+        "check-test-schedule": {
+            "task": "app.tasks.test_scheduler.check_scheduled_test",
+            "schedule": 60,
         },
     },
 )
