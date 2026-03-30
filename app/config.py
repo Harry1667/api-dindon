@@ -50,6 +50,17 @@ class Settings:
         default_factory=lambda: int(os.getenv("NOTIFY_THRESHOLD", "5"))
     )
 
+    # 功能開關 (Feature Flags)
+    enable_mock_hospital: bool = field(
+        default_factory=lambda: os.getenv("ENABLE_MOCK_HOSPITAL", "false").lower() == "true"
+    )
+    enable_wanfang_scraper: bool = field(
+        default_factory=lambda: os.getenv("ENABLE_WANFANG_SCRAPER", "false").lower() == "true"
+    )
+    enable_auto_create_tables: bool = field(
+        default_factory=lambda: os.getenv("ENABLE_AUTO_CREATE_TABLES", "false").lower() == "true"
+    )
+
     # 管理後台
     admin_username: str = field(
         default_factory=lambda: os.getenv("ADMIN_USERNAME", "admin")

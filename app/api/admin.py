@@ -155,6 +155,32 @@ async def api_hospitals(admin_token: str | None = Cookie(None)):
     ]
 
 
+@router.put("/api/hospitals/{code}/toggle")
+async def toggle_hospital(code: str, request: Request, admin_token: str | None = Cookie(None)):
+    """切換醫院啟用/停用"""
+    if not _check_auth(admin_token):
+        return JSONResponse({"error": "未登入"}, status_code=401)
+
+    body = await request.json()
+    active = body.get("is_active")
+    if active is None:
+        return JSONResponse({"error": "缺少 is_active"}, status_code=400)
+
+    from sqlalchemy import select
+    from app.models.database import async_session
+    from app.models.hospital import Hospital
+
+    async with async_session() as session:
+        result = await session.execute(select(Hospital).where(Hospital.code == code))
+        hospital = result.scalar_one_or_none()
+        if not hospital:
+            return JSONResponse({"error": f"找不到醫院: {code}"}, status_code=404)
+        hospital.is_active = bool(active)
+        await session.commit()
+
+    return {"ok": True, "code": code, "is_active": bool(active)}
+
+
 @router.put("/api/hospitals/{code}/aliases")
 async def update_hospital_aliases(code: str, request: Request, admin_token: str | None = Cookie(None)):
     """更新醫院簡稱和別名"""
@@ -339,7 +365,7 @@ body { font-family: -apple-system, 'Segoe UI', Roboto, 'Noto Sans TC', sans-seri
 .header .logout { color:#e74c3c; border-color:#e74c3c; }
 .header .logout:hover { background:#e74c3c; color:#fff; }
 
-.container { max-width:1200px; margin:20px auto; padding:0 16px; }
+.container { max-width:100%; margin:20px auto; padding:0 24px; }
 .hidden { display:none !important; }
 
 .stat-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(180px,1fr)); gap:16px; margin-bottom:24px; }
@@ -360,6 +386,8 @@ td.clickable:hover { color:#4a90d9; text-decoration:underline; }
 .badge-gray { background:#f0f0f0; color:#888; }
 .badge-blue { background:#e8f0fe; color:#2979ff; }
 .alias-list { font-size:11px; color:#888; }
+.toggle { cursor:pointer; }
+.toggle:hover { opacity:.7; }
 
 .filter-bar { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; align-items:center; }
 .filter-bar input { flex:1; min-width:180px; max-width:300px; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:14px; }
@@ -635,8 +663,8 @@ function doSort() {
 function renderHospitals(list) {
   document.getElementById('hospitalBody').innerHTML = list.map((h, i) => {
     const status = h.is_active
-      ? '<span class="badge badge-green">啟用</span>'
-      : '<span class="badge badge-gray">未啟用</span>';
+      ? `<span class="badge badge-green toggle" onclick="toggleHospital('${h.code}',false)">啟用</span>`
+      : `<span class="badge badge-gray toggle" onclick="toggleHospital('${h.code}',true)">未啟用</span>`;
     const adapter = h.adapter_name
       ? `<span class="badge badge-blue">${h.adapter_name}</span>`
       : '<span class="badge badge-red">未接入</span>';
@@ -661,6 +689,24 @@ function renderHospitals(list) {
       <td>${h.phone || ''}</td>
     </tr>`;
   }).join('');
+}
+
+// ===== 醫院開關 =====
+async function toggleHospital(code, active) {
+  try {
+    const r = await fetch(`/admin/api/hospitals/${code}/toggle`, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({is_active: active})
+    });
+    if (r.status === 401) { location.reload(); return; }
+    const d = await r.json();
+    if (d.ok) {
+      // 更新本地資料
+      const h = allHospitals.find(x => x.code === code);
+      if (h) h.is_active = active;
+      applyFilters();
+    }
+  } catch(e) {}
 }
 
 // ===== 編輯別名 =====

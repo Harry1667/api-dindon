@@ -1,5 +1,6 @@
 """爬蟲 Adapter 註冊中心 — 管理所有醫院的爬蟲模組"""
 
+from app.config import settings
 from app.scrapers.base import BaseHospitalAdapter
 
 # --- Imports ---
@@ -58,7 +59,8 @@ AdapterRegistry.register(taipei_changgung)             # 台北長庚
 AdapterRegistry.register(CathayAdapter())              # 國泰醫院
 AdapterRegistry.register(mackay_taipei)                # 馬偕醫院 台北
 AdapterRegistry.register(ShinkongAdapter())            # 新光醫院
-AdapterRegistry.register(WanfangAdapter())             # 萬芳醫院
+if settings.enable_wanfang_scraper:
+    AdapterRegistry.register(WanfangAdapter())           # 萬芳醫院（需 ENABLE_WANFANG_SCRAPER=true）
 
 # --- 台北市 區域醫院 ---
 AdapterRegistry.register(ntuh_children)                # 台大兒童醫院
