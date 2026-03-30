@@ -1,9 +1,16 @@
-"""Redis 快取服務 — 管理即時看診進度快取"""
+"""Redis 快取服務 — 管理即時看診進度快取
+
+錯誤處理策略：
+  - 所有 Redis 操作都有 try/except
+  - Redis 斷線時回傳空結果，不讓系統掛掉
+  - 連線超時 5 秒，避免永遠卡住
+"""
 
 import json
 import logging
 
 import redis.asyncio as aioredis
+from redis.exceptions import RedisError
 
 from app.config import settings
 from app.schemas.clinic import ClinicProgressData
@@ -12,12 +19,15 @@ logger = logging.getLogger(__name__)
 
 
 class CacheService:
-    """Redis 快取管理"""
+    """Redis 快取管理，含錯誤處理和超時保護"""
 
     def __init__(self):
         self.redis = aioredis.from_url(
             settings.redis_url,
             decode_responses=True,
+            socket_connect_timeout=5,
+            socket_timeout=5,
+            retry_on_timeout=True,
         )
 
     async def store_progress(self, progress_list: list[ClinicProgressData]):
@@ -26,58 +36,70 @@ class CacheService:
             return
 
         hospital_code = progress_list[0].hospital_code
-        pipe = self.redis.pipeline()
+        try:
+            pipe = self.redis.pipeline()
 
-        # 清除該醫院舊資料
-        old_keys = await self.redis.keys(f"progress:{hospital_code}:*")
-        if old_keys:
-            pipe.delete(*old_keys)
+            # 清除該醫院舊資料
+            old_keys = await self.redis.keys(f"progress:{hospital_code}:*")
+            if old_keys:
+                pipe.delete(*old_keys)
 
-        # 寫入新資料
-        for p in progress_list:
-            key = p.to_cache_key()
-            pipe.set(key, json.dumps(p.to_dict(), ensure_ascii=False), ex=300)
+            # 寫入新資料
+            for p in progress_list:
+                key = p.to_cache_key()
+                pipe.set(key, json.dumps(p.to_dict(), ensure_ascii=False), ex=300)
 
-        # 更新醫院的診間列表索引
-        room_keys = [p.to_cache_key() for p in progress_list]
-        index_key = f"index:{hospital_code}"
-        pipe.delete(index_key)
-        if room_keys:
-            pipe.sadd(index_key, *room_keys)
-            pipe.expire(index_key, 300)
+            # 更新醫院的診間列表索引
+            room_keys = [p.to_cache_key() for p in progress_list]
+            index_key = f"index:{hospital_code}"
+            pipe.delete(index_key)
+            if room_keys:
+                pipe.sadd(index_key, *room_keys)
+                pipe.expire(index_key, 300)
 
-        await pipe.execute()
-        logger.info(f"[cache] 已更新 {hospital_code} 共 {len(progress_list)} 筆")
+            await pipe.execute()
+            logger.info(f"[cache] 已更新 {hospital_code} 共 {len(progress_list)} 筆")
+        except RedisError as e:
+            logger.error(f"[cache] Redis 寫入失敗 {hospital_code}: {e}")
+        except Exception as e:
+            logger.error(f"[cache] 儲存失敗 {hospital_code}: {e}")
 
     async def get_all_progress(self, hospital_code: str) -> list[ClinicProgressData]:
         """取得某醫院所有診間的即時進度"""
-        index_key = f"index:{hospital_code}"
-        room_keys = await self.redis.smembers(index_key)
+        try:
+            index_key = f"index:{hospital_code}"
+            room_keys = await self.redis.smembers(index_key)
 
-        if not room_keys:
+            if not room_keys:
+                return []
+
+            results = []
+            for key in room_keys:
+                data = await self.redis.get(key)
+                if data:
+                    d = json.loads(data)
+                    results.append(ClinicProgressData(
+                        hospital_code=d["hospital_code"],
+                        hospital_name=d["hospital_name"],
+                        date=d["date"],
+                        session=d["session"],
+                        department=d["department"],
+                        doctor_name=d["doctor_name"],
+                        clinic_room=d["clinic_room"],
+                        current_number=d["current_number"],
+                        next_number=d["next_number"],
+                        is_current_skipped=d["is_current_skipped"],
+                        is_next_skipped=d["is_next_skipped"],
+                        fetched_at=__import__("datetime").datetime.fromisoformat(d["fetched_at"]),
+                    ))
+
+            return results
+        except RedisError as e:
+            logger.error(f"[cache] Redis 讀取失敗 {hospital_code}: {e}")
             return []
-
-        results = []
-        for key in room_keys:
-            data = await self.redis.get(key)
-            if data:
-                d = json.loads(data)
-                results.append(ClinicProgressData(
-                    hospital_code=d["hospital_code"],
-                    hospital_name=d["hospital_name"],
-                    date=d["date"],
-                    session=d["session"],
-                    department=d["department"],
-                    doctor_name=d["doctor_name"],
-                    clinic_room=d["clinic_room"],
-                    current_number=d["current_number"],
-                    next_number=d["next_number"],
-                    is_current_skipped=d["is_current_skipped"],
-                    is_next_skipped=d["is_next_skipped"],
-                    fetched_at=__import__("datetime").datetime.fromisoformat(d["fetched_at"]),
-                ))
-
-        return results
+        except Exception as e:
+            logger.error(f"[cache] 讀取失敗 {hospital_code}: {e}")
+            return []
 
     async def search_progress(
         self,
@@ -101,5 +123,16 @@ class CacheService:
 
         return results
 
+    async def is_healthy(self) -> bool:
+        """檢查 Redis 連線是否正常"""
+        try:
+            await self.redis.ping()
+            return True
+        except (RedisError, Exception):
+            return False
+
     async def close(self):
-        await self.redis.close()
+        try:
+            await self.redis.close()
+        except Exception:
+            pass

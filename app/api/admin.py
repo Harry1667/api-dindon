@@ -11,8 +11,7 @@ from app.config import settings
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-import hashlib
-JWT_SECRET = hashlib.sha256(settings.admin_password.encode()).hexdigest()
+JWT_SECRET = settings.jwt_secret_key
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = 24
 
@@ -93,6 +92,66 @@ async def api_stats(admin_token: str | None = Cookie(None)):
         "total_users": total_users,
         "active_tracks": active_tracks,
         "total_tracks": total_tracks,
+    }
+
+
+@router.get("/api/dashboard")
+async def api_dashboard(admin_token: str | None = Cookie(None)):
+    """增強版儀表板：活躍用戶、追蹤排行、爬蟲健康、通知數、漏斗"""
+    if not _check_auth(admin_token):
+        return JSONResponse({"error": "未登入"}, status_code=401)
+
+    from sqlalchemy import select, func, text
+    from app.models.database import async_session
+    from app.models.analytics import AnalyticsEvent
+    from app.models.tracking_task import TrackingTask
+
+    async with async_session() as session:
+        # 今日活躍用戶（24 小時內有事件的不重複用戶數）
+        today_active = (await session.execute(
+            select(func.count(func.distinct(AnalyticsEvent.user_id))).where(
+                AnalyticsEvent.created_at >= text("DATE_SUB(NOW(), INTERVAL 24 HOUR)")
+            )
+        )).scalar() or 0
+
+        # 各醫院追蹤排行（活躍追蹤數）
+        hospital_ranking = (await session.execute(
+            select(
+                TrackingTask.hospital_code,
+                func.count(TrackingTask.id).label("count")
+            ).where(
+                TrackingTask.status == "active"
+            ).group_by(
+                TrackingTask.hospital_code
+            ).order_by(
+                func.count(TrackingTask.id).desc()
+            ).limit(10)
+        )).all()
+
+        # 24 小時通知數
+        notify_count_24h = (await session.execute(
+            select(func.count(AnalyticsEvent.id)).where(
+                AnalyticsEvent.event_type == "notify",
+                AnalyticsEvent.created_at >= text("DATE_SUB(NOW(), INTERVAL 24 HOUR)")
+            )
+        )).scalar() or 0
+
+        # 漏斗數據（最近 7 天）
+        funnel = {}
+        for event_type in ["follow", "query", "track_start", "track_end", "notify"]:
+            count = (await session.execute(
+                select(func.count(AnalyticsEvent.id)).where(
+                    AnalyticsEvent.event_type == event_type,
+                    AnalyticsEvent.created_at >= text("DATE_SUB(NOW(), INTERVAL 7 DAY)")
+                )
+            )).scalar() or 0
+            funnel[event_type] = count
+
+    return {
+        "today_active_users": today_active,
+        "hospital_ranking": [{"code": r[0], "count": r[1]} for r in hospital_ranking],
+        "notify_count_24h": notify_count_24h,
+        "funnel_7d": funnel,
     }
 
 

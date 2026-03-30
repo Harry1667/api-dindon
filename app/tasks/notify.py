@@ -34,8 +34,8 @@ def _run_async(coro):
         loop.close()
 
 
-@celery_app.task(name="app.tasks.notify.check_and_notify")
-def check_and_notify():
+@celery_app.task(name="app.tasks.notify.check_and_notify", bind=True, max_retries=3, default_retry_delay=30)
+def check_and_notify(self):
     """檢查所有追蹤任務並推播通知（只在看診時間執行）"""
     if not _is_operating_hours():
         return
@@ -44,6 +44,7 @@ def check_and_notify():
         _run_async(_check())
     except Exception as e:
         logger.error(f"通知任務失敗: {e}", exc_info=True)
+        raise self.retry(exc=e)
 
 
 async def _check():

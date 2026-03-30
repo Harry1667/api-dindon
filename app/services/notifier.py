@@ -140,12 +140,23 @@ class NotifierService:
         if current > user_num:
             # 只通知一次，避免重複轟炸
             if last_remaining is not None and last_remaining <= 0:
-                return  # 已經通知過過號了
+                # 過號超過 30 分鐘 → 自動停止追蹤
+                from datetime import datetime, timedelta
+                if (task.updated_at and
+                        datetime.utcnow() - task.updated_at > timedelta(minutes=30)):
+                    message = (
+                        f"ℹ️ 過號超過 30 分鐘，自動停止追蹤\n"
+                        f"{header}\n"
+                        f"如需繼續追蹤，請重新輸入醫院名稱查詢"
+                    )
+                    await self._send_and_finish(task, line_user_id, message, "passed")
+                return
             message = (
                 f"⚠️ 您的號碼可能已過號\n"
                 f"{header}\n"
                 f"目前看到第 {current} 號，您是第 {user_num} 號\n"
-                f"請前往診間確認，告知護理站您已到"
+                f"請前往診間確認，告知護理站您已到\n\n"
+                f"輸入 c 取消追蹤（30 分鐘後自動停止）"
             )
             # 記錄 remaining=0 表示已通知過號，但不結束追蹤
             await self._send(task, line_user_id, message, remaining=0)
@@ -205,27 +216,47 @@ class NotifierService:
         return False
 
     async def _send(self, task, line_user_id: str, message: str, remaining: int):
-        """發送通知，更新剩餘數，但不結束追蹤"""
+        """發送通知，更新剩餘數，但不結束追蹤
+
+        原子性保證：先推播成功，才更新 DB。推播失敗時不更新狀態，
+        下次 check cycle 會重新觸發通知。
+        """
+        track_log(task.id, "notify", message[:300])
         try:
-            track_log(task.id, "notify", message[:300])
             await self.line_bot.push_message(line_user_id, message)
-            await self.tracker.update_last_remaining(task.id, remaining)
-            logger.info(
-                f"[notifier] 已通知 user={line_user_id} task={task.id} remaining={remaining}"
-            )
         except Exception as e:
             logger.error(f"[notifier] 推播失敗 task={task.id}: {e}")
+            return  # 推播失敗，不更新 DB，下次重試
+        try:
+            await self.tracker.update_last_remaining(task.id, remaining)
+        except Exception as e:
+            logger.error(f"[notifier] 更新剩餘數失敗 task={task.id}: {e}")
+        logger.info(
+            f"[notifier] 已通知 user={line_user_id} task={task.id} remaining={remaining}"
+        )
 
     async def _send_and_finish(self, task, line_user_id: str, message: str, end_reason: str = "arrived"):
-        """發送通知、標記完成、建立回饋記錄、詢問用戶"""
+        """發送通知、標記完成、建立回饋記錄、詢問用戶
+
+        原子性保證：先推播成功，才標記完成。推播失敗時不改 DB，
+        下次 check cycle 會重新嘗試通知。
+        """
+        track_log(task.id, "notify", message[:300])
+        # Step 1: 先推播，失敗就不改 DB
         try:
-            track_log(task.id, "notify", message[:300])
             await self.line_bot.push_message(line_user_id, message)
+        except Exception as e:
+            logger.error(f"[notifier] 推播失敗 task={task.id}: {e}")
+            return  # 推播失敗，不標記完成，下次重試
+        # Step 2: 推播成功，標記完成
+        try:
             await self.tracker.mark_notified(task.id)
-
-            feedback_id = await self._create_feedback(task, line_user_id, message, end_reason)
-
-            if feedback_id:
+        except Exception as e:
+            logger.error(f"[notifier] 標記完成失敗 task={task.id}: {e}")
+        # Step 3: 建立回饋（非關鍵，失敗不影響主流程）
+        feedback_id = await self._create_feedback(task, line_user_id, message, end_reason)
+        if feedback_id:
+            try:
                 await self.line_bot.push_message(line_user_id, (
                     f"📋 追蹤結束，通知是否正確？\n\n"
                     f"  0 — ✅ 正確\n"
@@ -237,10 +268,9 @@ class NotifierService:
                     "state": "waiting_feedback",
                     "feedback_id": feedback_id,
                 }
-
-            logger.info(f"[notifier] 已通知(結束) task={task.id} reason={end_reason} feedback={feedback_id}")
-        except Exception as e:
-            logger.error(f"[notifier] 推播失敗 task={task.id}: {e}")
+            except Exception as e:
+                logger.error(f"[notifier] 回饋推播失敗 task={task.id}: {e}")
+        logger.info(f"[notifier] 已通知(結束) task={task.id} reason={end_reason} feedback={feedback_id}")
 
     async def _create_feedback(self, task, line_user_id: str, message: str, end_reason: str) -> int | None:
         """建立回饋記錄，包含完整追蹤過程資訊"""

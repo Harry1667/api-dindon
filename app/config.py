@@ -68,6 +68,20 @@ class Settings:
     admin_password: str = field(
         default_factory=lambda: os.getenv("ADMIN_PASSWORD", "changeme")
     )
+    jwt_secret_key: str = field(
+        default_factory=lambda: os.getenv("JWT_SECRET_KEY", "")
+    )
+
+    # 管理員 LINE ID（接收爬蟲告警）
+    admin_line_user_id: str = field(
+        default_factory=lambda: os.getenv("ADMIN_LINE_USER_ID", "")
+    )
+
+    def __post_init__(self):
+        # JWT secret 未設定時自動產生（每次重啟會變，正式環境務必設定）
+        if not self.jwt_secret_key:
+            import secrets as _secrets
+            self.jwt_secret_key = _secrets.token_urlsafe(32)
 
     @property
     def database_url(self) -> str:

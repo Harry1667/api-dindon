@@ -145,14 +145,45 @@ async def _scrape_all():
 
                 logger.info(f"[scrape] {adapter.hospital_name} 完成，{len(progress_list)} 個診間")
                 _record_result(code, has_data=True)
+                # 重置失敗計數
+                try:
+                    _get_redis().delete(f"scrape:fail_count:{code}")
+                except Exception:
+                    pass
             else:
                 logger.info(f"[scrape] {adapter.hospital_name} 目前沒有看診中的診間")
                 _record_result(code, has_data=False)
 
         except Exception as e:
             logger.error(f"[scrape] {adapter.hospital_name} 抓取失敗: {e}")
+            # 連續失敗告警
+            await _check_and_alert_failure(code, adapter.hospital_name, str(e))
 
     await cache.close()
+
+
+async def _check_and_alert_failure(hospital_code: str, hospital_name: str, error: str):
+    """連續失敗 3 次後通知管理員"""
+    try:
+        r = _get_redis()
+        fail_key = f"scrape:fail_count:{hospital_code}"
+        count = r.incr(fail_key)
+        r.expire(fail_key, 3600)  # 1 小時過期
+
+        if count == 3:  # 剛好第 3 次時告警
+            admin_id = settings.admin_line_user_id
+            if admin_id:
+                from app.services.line_bot import LineBotService
+                bot = LineBotService()
+                await bot.push_message(admin_id, (
+                    f"⚠️ 爬蟲告警\n"
+                    f"{hospital_name} ({hospital_code})\n"
+                    f"連續失敗 {count} 次\n"
+                    f"錯誤: {error[:200]}"
+                ))
+                logger.warning(f"[scrape] 已通知管理員: {hospital_name} 連續失敗 {count} 次")
+    except Exception as e:
+        logger.error(f"[scrape] 告警發送失敗: {e}")
 
 
 @celery_app.task(name="app.tasks.scrape.scrape_hospital")

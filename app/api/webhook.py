@@ -18,6 +18,7 @@ from linebot.v3.webhooks import (
 from app.config import settings
 from app.services.line_bot import LineBotService
 from app.services.track_logger import log_message as track_log
+from app.services.analytics import track_event
 from demo_chat import handle_message, reset_conv, _conversations
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,15 @@ async def webhook(request: Request):
             await _handle_event(event)
         except Exception as e:
             logger.error(f"處理事件失敗: {e}", exc_info=True)
+            # 友善錯誤訊息：讓用戶知道系統有收到但處理失敗
+            try:
+                if hasattr(event, 'reply_token'):
+                    await line_bot_service.reply(
+                        event.reply_token,
+                        "抱歉，系統暫時忙碌中，請稍後再試 🙏"
+                    )
+            except Exception:
+                pass  # 回覆失敗也不能再拋錯
 
     return "OK"
 
@@ -59,14 +69,28 @@ async def _handle_event(event):
     if isinstance(event, FollowEvent):
         user_id = event.source.user_id
         logger.info(f"新用戶加入: {user_id}")
-        reply = await handle_message("說明", user_id)
-        await line_bot_service.reply(event.reply_token, reply)
+        welcome = (
+            "👋 歡迎使用叮咚到號！\n\n"
+            "我能幫你即時追蹤醫院看診進度，\n"
+            "快到你的號碼時主動通知你。\n\n"
+            "✨ 試試看：輸入你常去的醫院名稱\n"
+            "例如：台大醫院、長庚、馬偕\n\n"
+            "📋 輸入「說明」查看完整功能"
+        )
+        await line_bot_service.reply(event.reply_token, welcome)
+        await track_event("follow", user_id=user_id)
 
     elif isinstance(event, MessageEvent):
         if isinstance(event.message, TextMessageContent):
             user_id = event.source.user_id
             text = event.message.text
-            logger.info(f"收到訊息: user={user_id} text={text}")
+
+            # 輸入驗證：限制訊息長度
+            if len(text) > 500:
+                await line_bot_service.reply(event.reply_token, "訊息過長，請縮短後再試")
+                return
+
+            logger.info(f"收到訊息: user={user_id} text={text[:100]}")
 
             # 先檢查是否在多步驟流程中（追蹤/預約追蹤）
             if await _handle_track_flow(user_id, text, event.reply_token):
@@ -165,7 +189,12 @@ async def _handle_track_flow(user_id: str, text: str, reply_token: str) -> bool:
             await line_bot_service.reply(reply_token, "請輸入數字號碼\n輸入「取消」可取消")
             return True
 
-        conv["track_number"] = int(numbers[0])
+        num = int(numbers[0])
+        if num <= 0 or num > 9999:
+            await line_bot_service.reply(reply_token, "號碼範圍 1~9999，請重新輸入")
+            return True
+
+        conv["track_number"] = num
         conv["state"] = "waiting_track_mode"
         await line_bot_service.reply(reply_token, (
             f"您是第 {conv['track_number']} 號\n\n"
