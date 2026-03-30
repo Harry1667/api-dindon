@@ -5,10 +5,12 @@ import logging
 import redis as sync_redis
 import os
 
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+
 from app.tasks.celery_app import celery_app
 from app.scrapers.registry import AdapterRegistry
 from app.services.cache import CacheService
-from app.models.database import async_session
+from app.config import settings
 from app.models.clinic_progress import ClinicProgress
 
 logger = logging.getLogger(__name__)
@@ -84,11 +86,19 @@ def _run_async(coro):
 @celery_app.task(name="app.tasks.scrape.scrape_all_hospitals", bind=True, max_retries=3)
 def scrape_all_hospitals(self):
     """抓取所有啟用醫院的看診進度（動態頻率控制）"""
+    # 用 Redis 鎖防止多個 task 同時跑
+    r = _get_redis()
+    lock_key = "scrape:running_lock"
+    if not r.set(lock_key, "1", nx=True, ex=300):
+        logger.info("[scrape] 上一輪還在跑，跳過本次")
+        return
     try:
         _run_async(_scrape_all())
     except Exception as exc:
         logger.error(f"爬蟲任務失敗: {exc}", exc_info=True)
         raise self.retry(exc=exc, countdown=10)
+    finally:
+        r.delete(lock_key)
 
 
 async def _scrape_all():
@@ -111,7 +121,9 @@ async def _scrape_all():
 
                 # 同時寫入 MySQL clinic_progress 表
                 try:
-                    async with async_session() as session:
+                    local_engine = create_async_engine(settings.database_url, echo=False)
+                    local_session = async_sessionmaker(local_engine, class_=AsyncSession, expire_on_commit=False)
+                    async with local_session() as session:
                         for p in progress_list:
                             session.add(ClinicProgress(
                                 hospital_code=p.hospital_code,
@@ -127,6 +139,7 @@ async def _scrape_all():
                                 fetched_at=p.fetched_at,
                             ))
                         await session.commit()
+                    await local_engine.dispose()
                 except Exception as db_err:
                     logger.error(f"[scrape] {adapter.hospital_name} 寫入 MySQL 失敗: {db_err}")
 

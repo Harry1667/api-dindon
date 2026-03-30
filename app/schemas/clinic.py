@@ -43,8 +43,8 @@ class ClinicProgressData:
         )
 
     def to_cache_key(self) -> str:
-        """Redis 快取 key"""
-        return f"progress:{self.hospital_code}:{self.clinic_room}"
+        """Redis 快取 key — 用 department + doctor_name + clinic_room 確保唯一"""
+        return f"progress:{self.hospital_code}:{self.department}:{self.doctor_name}:{self.clinic_room}"
 
     def to_dict(self) -> dict:
         """轉為字典（存入 Redis）"""

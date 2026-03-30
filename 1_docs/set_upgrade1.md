@@ -23,7 +23,7 @@
 
 ## 二、安全性問題（必須優先處理）
 
-### 2.1 敏感資訊外洩風險
+### 2.1 敏感資訊外洩風險 (沒有問題,Git是自己的服務器)
 
 **問題：** `.env` 檔案包含 LINE secret、MySQL 密碼、Admin 密碼等，若不慎提交到 Git 將導致全面洩漏。
 
@@ -44,7 +44,7 @@ SECRET_KEY = hashlib.sha256(settings.admin_password.encode()).hexdigest()
 - 新增獨立的 `JWT_SECRET_KEY` 環境變數，使用 `secrets.token_hex(32)` 產生
 - Admin 密碼與 JWT secret 完全解耦
 
-### 2.3 缺少輸入驗證
+### 2.3 缺少輸入驗證 (未來再處理)
 
 **問題：** 使用者透過 LINE 傳送的文字（醫院名、科別、號碼）未經驗證即進入系統。
 

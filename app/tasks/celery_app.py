@@ -26,8 +26,9 @@ celery_app.conf.update(
     accept_content=["json"],
 
     # 任務超時（預設值，個別任務可覆蓋）
-    task_soft_time_limit=120,
-    task_time_limit=180,
+    # 29 家醫院序列抓取 + 部分醫院回應慢，需要較長時間
+    task_soft_time_limit=600,
+    task_time_limit=660,
 
     # 自動發現任務
     include=["app.tasks.scrape", "app.tasks.notify", "app.tasks.nhi_sync", "app.tasks.sync_master_data"],

@@ -16,7 +16,7 @@ class ClinicProgress(Base):
     session: Mapped[str] = mapped_column(String(20), nullable=False, comment="診別 如 上午診/午診/夜診")
     department: Mapped[str] = mapped_column(String(100), nullable=False, comment="科別")
     doctor_name: Mapped[str] = mapped_column(String(50), nullable=False, comment="醫師姓名")
-    clinic_room: Mapped[str] = mapped_column(String(20), nullable=False, comment="診間號碼 如 282診")
+    clinic_room: Mapped[str] = mapped_column(String(100), nullable=False, comment="診間號碼 如 282診")
     current_number: Mapped[int] = mapped_column(Integer, nullable=False, comment="目前號碼")
     next_number: Mapped[int] = mapped_column(Integer, nullable=False, comment="下一號碼")
     is_current_skipped: Mapped[bool] = mapped_column(Boolean, default=False, comment="目前號碼是否過號")

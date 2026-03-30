@@ -130,13 +130,15 @@ class WanfangAdapter(BaseHospitalAdapter):
     def _parse_card(self, card, now: datetime, fallback_dept: str) -> ClinicProgressData | None:
         """解析單一 .card-panel 卡片
 
-        卡片 innerText 結構：
-          2026/03/28  上午診
-          精神科
-          許元彰
-          282診
-          45    46
-          目前號碼  下一號碼
+        卡片 get_text 行結構：
+          0: 2026/03/30  上午診
+          1: 心臟內科
+          2: 葉仲軒
+          3: 205診
+          4: 目前號碼
+          5: 11
+          6: 下一號碼
+          7: 12
           (過號)              ← 可選
         """
         text = card.get_text(separator="\n", strip=True)
@@ -153,43 +155,43 @@ class WanfangAdapter(BaseHospitalAdapter):
         date_str = date_match.group(1)
 
         session = "上午診"
-        if "上午" in date_session or "早" in date_session:
-            session = "上午診"
-        elif "下午" in date_session or "午" in date_session:
+        if "下午" in date_session:
             session = "下午診"
         elif "夜" in date_session:
             session = "夜診"
 
         # 第 2 行: 科別
         department = lines[1]
-
         # 第 3 行: 醫師
         doctor_name = lines[2]
-
         # 第 4 行: 診間
         clinic_room = lines[3]
 
-        # 第 5 行: 號碼 (tab 分隔)
-        numbers_line = lines[4]
-        numbers = re.findall(r"\d+", numbers_line)
-        if len(numbers) < 2:
-            return None
-        current_number = int(numbers[0])
-        next_number = int(numbers[1])
+        # 從剩餘行中提取號碼：找「目前號碼」後面的數字 和「下一號碼」後面的數字
+        full_text = " ".join(lines[4:])
+        current_number = 0
+        next_number = 0
 
-        # 檢查過號狀態
-        is_current_skipped = False
+        m_current = re.search(r"目前號碼\s*(\d+)", full_text)
+        m_next = re.search(r"下一號碼\s*(\d+)", full_text)
+
+        if m_current:
+            current_number = int(m_current.group(1))
+        if m_next:
+            next_number = int(m_next.group(1))
+
+        if current_number == 0 and next_number == 0:
+            # 回退：直接從所有行找數字
+            numbers = re.findall(r"\d+", full_text)
+            nums = [int(n) for n in numbers if n != date_str.replace("/", "")]
+            if len(nums) >= 2:
+                current_number, next_number = nums[0], nums[1]
+            else:
+                return None
+
+        # 檢查過號
+        is_current_skipped = "(過號)" in full_text
         is_next_skipped = False
-        tables = card.select("table")
-        for table in tables:
-            tds = table.select("td")
-            for i, td in enumerate(tds):
-                td_text = td.get_text(strip=True)
-                if "(過號)" in td_text or "過號" in td_text:
-                    if i % 2 == 0:
-                        is_current_skipped = True
-                    else:
-                        is_next_skipped = True
 
         return ClinicProgressData(
             hospital_code=self.hospital_code,

@@ -96,6 +96,68 @@ async def api_stats(admin_token: str | None = Cookie(None)):
     }
 
 
+# ============================================================
+# 快捷指令管理（存 Redis）
+# ============================================================
+
+SHORTCUTS_KEY = "config:shortcuts"
+
+# 預設快捷指令
+DEFAULT_SHORTCUTS = [
+    {"trigger": "0, 返回, 主選單", "action": "返回", "label": "回主選單", "description": "回到主選單"},
+    {"trigger": "00, 醫院, 列表", "action": "醫院", "label": "醫院列表", "description": "查看支援的醫院"},
+    {"trigger": "9", "action": "返回", "label": "上一層", "description": "返回上一層選單"},
+    {"trigger": "h, help, 說明, 幫助", "action": "說明", "label": "功能介紹", "description": "顯示使用說明"},
+    {"trigger": "t, 追蹤, 我的追蹤", "action": "我的追蹤", "label": "追蹤狀態", "description": "查看目前追蹤"},
+    {"trigger": "c, 取消追蹤, 停止追蹤", "action": "取消追蹤", "label": "取消追蹤", "description": "取消所有追蹤"},
+]
+
+
+def _get_shortcuts() -> list[dict]:
+    """從 Redis 讀取快捷指令，若不存在則寫入預設值"""
+    import json
+    import redis as sync_redis
+    r = sync_redis.from_url(settings.redis_url if hasattr(settings, 'redis_url') else "redis://redis:6379/0", decode_responses=True)
+    data = r.get(SHORTCUTS_KEY)
+    if data:
+        return json.loads(data)
+    # 寫入預設
+    r.set(SHORTCUTS_KEY, json.dumps(DEFAULT_SHORTCUTS, ensure_ascii=False))
+    return DEFAULT_SHORTCUTS
+
+
+def _save_shortcuts(shortcuts: list[dict]):
+    import json
+    import redis as sync_redis
+    r = sync_redis.from_url(settings.redis_url if hasattr(settings, 'redis_url') else "redis://redis:6379/0", decode_responses=True)
+    r.set(SHORTCUTS_KEY, json.dumps(shortcuts, ensure_ascii=False))
+
+
+@router.get("/api/shortcuts")
+async def api_get_shortcuts(admin_token: str | None = Cookie(None)):
+    if not _check_auth(admin_token):
+        return JSONResponse({"error": "未登入"}, status_code=401)
+    return _get_shortcuts()
+
+
+@router.put("/api/shortcuts")
+async def api_save_shortcuts(request: Request, admin_token: str | None = Cookie(None)):
+    if not _check_auth(admin_token):
+        return JSONResponse({"error": "未登入"}, status_code=401)
+    body = await request.json()
+    shortcuts = body if isinstance(body, list) else body.get("shortcuts", [])
+    _save_shortcuts(shortcuts)
+    return {"ok": True, "count": len(shortcuts)}
+
+
+@router.post("/api/shortcuts/reset")
+async def api_reset_shortcuts(admin_token: str | None = Cookie(None)):
+    if not _check_auth(admin_token):
+        return JSONResponse({"error": "未登入"}, status_code=401)
+    _save_shortcuts(DEFAULT_SHORTCUTS)
+    return {"ok": True, "shortcuts": DEFAULT_SHORTCUTS}
+
+
 @router.get("/api/hospitals")
 async def api_hospitals(admin_token: str | None = Cookie(None)):
     if not _check_auth(admin_token):
@@ -441,6 +503,7 @@ th.sortable span { font-size:10px; }
   <div class="right">
     <button id="tabStats" class="active" onclick="switchTab('stats')">統計總覽</button>
     <button id="tabHospitals" onclick="switchTab('hospitals')">醫院管理</button>
+    <button id="tabShortcuts" onclick="switchTab('shortcuts')">快捷指令</button>
     <button class="logout" onclick="doLogout()">登出</button>
   </div>
 </div>
@@ -485,6 +548,35 @@ th.sortable span { font-size:10px; }
   </div>
 </div>
 
+<!-- 快捷指令頁 -->
+<div class="container hidden" id="pageShortcuts">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <h2 style="font-size:16px;margin:0;">快捷指令設定</h2>
+    <div style="display:flex;gap:8px;">
+      <button class="btn" onclick="addShortcut()" style="padding:6px 14px;border:1px solid #4a90d9;border-radius:6px;background:#4a90d9;color:#fff;cursor:pointer;font-size:13px;">+ 新增指令</button>
+      <button onclick="resetShortcuts()" style="padding:6px 14px;border:1px solid #e74c3c;border-radius:6px;background:#fff;color:#e74c3c;cursor:pointer;font-size:13px;">恢復預設</button>
+    </div>
+  </div>
+  <p style="font-size:13px;color:#888;margin-bottom:12px;">用戶輸入「觸發詞」時，系統會自動轉換為「對應動作」執行。觸發詞用逗號分隔可設多個（如：h, help, 說明）。</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th style="width:36px">#</th>
+        <th style="width:33%">觸發詞（逗號分隔）</th>
+        <th style="width:120px">對應動作</th>
+        <th style="width:100px">顯示名稱</th>
+        <th>說明</th>
+        <th style="width:60px">操作</th>
+      </tr></thead>
+      <tbody id="shortcutBody"></tbody>
+    </table>
+  </div>
+  <div style="margin-top:12px;display:flex;gap:8px;">
+    <button class="btn" onclick="saveShortcuts()" style="padding:8px 24px;border:none;border-radius:6px;background:#27ae60;color:#fff;cursor:pointer;font-size:14px;">儲存變更</button>
+    <span id="shortcutMsg" style="font-size:13px;color:#27ae60;line-height:36px;"></span>
+  </div>
+</div>
+
 <script>
 let currentTab = 'stats';
 let allHospitals = [];
@@ -523,12 +615,13 @@ async function doLogout() {
 // ===== 切頁 =====
 function switchTab(tab) {
   currentTab = tab;
-  document.getElementById('pageStats').classList.toggle('hidden', tab !== 'stats');
-  document.getElementById('pageHospitals').classList.toggle('hidden', tab !== 'hospitals');
-  document.getElementById('tabStats').classList.toggle('active', tab === 'stats');
-  document.getElementById('tabHospitals').classList.toggle('active', tab === 'hospitals');
+  for (const p of ['Stats','Hospitals','Shortcuts']) {
+    document.getElementById('page'+p).classList.toggle('hidden', tab !== p.toLowerCase());
+    document.getElementById('tab'+p).classList.toggle('active', tab === p.toLowerCase());
+  }
   if (tab === 'stats') loadStats();
   if (tab === 'hospitals') loadHospitals();
+  if (tab === 'shortcuts') loadShortcuts();
 }
 
 // ===== 統計 =====
@@ -801,6 +894,81 @@ async function saveEdit() {
     }
   } catch(e) {}
 })();
+// ===== 快捷指令 =====
+let shortcuts = [];
+
+async function loadShortcuts() {
+  try {
+    const r = await fetch('/admin/api/shortcuts');
+    if (r.status === 401) { location.reload(); return; }
+    shortcuts = await r.json();
+    renderShortcuts();
+  } catch(e) {}
+}
+
+function renderShortcuts() {
+  const tbody = document.getElementById('shortcutBody');
+  if (!shortcuts.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888;padding:20px;">尚無快捷指令</td></tr>';
+    return;
+  }
+  tbody.innerHTML = shortcuts.map((s, i) => `<tr>
+    <td>${i+1}</td>
+    <td><input value="${s.trigger||''}" onchange="shortcuts[${i}].trigger=this.value" placeholder="h, help, 說明" style="width:100%;padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:13px;"></td>
+    <td><input value="${s.action||''}" onchange="shortcuts[${i}].action=this.value" style="width:100%;padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:13px;"></td>
+    <td><input value="${s.label||''}" onchange="shortcuts[${i}].label=this.value" style="width:100%;padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:13px;"></td>
+    <td><input value="${s.description||''}" onchange="shortcuts[${i}].description=this.value" style="width:100%;padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:13px;"></td>
+    <td><button onclick="removeShortcut(${i})" style="padding:4px 10px;border:1px solid #e74c3c;border-radius:4px;background:#fff;color:#e74c3c;cursor:pointer;font-size:12px;">刪除</button></td>
+  </tr>`).join('');
+}
+
+function addShortcut() {
+  shortcuts.push({trigger:'', action:'', label:'', description:''});
+  renderShortcuts();
+  // focus last trigger input
+  const inputs = document.querySelectorAll('#shortcutBody input');
+  if (inputs.length) inputs[inputs.length - 4].focus();
+}
+
+function removeShortcut(i) {
+  shortcuts.splice(i, 1);
+  renderShortcuts();
+}
+
+async function saveShortcuts() {
+  // filter empty triggers
+  const valid = shortcuts.filter(s => s.trigger && s.action);
+  try {
+    const r = await fetch('/admin/api/shortcuts', {
+      method: 'PUT',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(valid),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      shortcuts = valid;
+      renderShortcuts();
+      const msg = document.getElementById('shortcutMsg');
+      msg.textContent = `已儲存 ${d.count} 筆快捷指令`;
+      setTimeout(() => msg.textContent = '', 3000);
+    }
+  } catch(e) {}
+}
+
+async function resetShortcuts() {
+  if (!confirm('確定恢復為預設快捷指令？')) return;
+  try {
+    const r = await fetch('/admin/api/shortcuts/reset', {method:'POST'});
+    const d = await r.json();
+    if (d.ok) {
+      shortcuts = d.shortcuts;
+      renderShortcuts();
+      const msg = document.getElementById('shortcutMsg');
+      msg.textContent = '已恢復預設';
+      setTimeout(() => msg.textContent = '', 3000);
+    }
+  } catch(e) {}
+}
 </script>
 </body>
 </html>"""

@@ -34,7 +34,6 @@ class NotifierService:
 
     async def _check_single_task(self, task, line_user_id: str):
         """檢查單一追蹤任務"""
-        # 搜尋該任務對應的診間進度
         results = await self.cache.search_progress(
             hospital_code=task.hospital_code,
             department=task.department if task.department else None,
@@ -46,34 +45,48 @@ class NotifierService:
             return
 
         progress = results[0]
+        current = progress.current_number
+        user_num = task.user_number
+        remaining = max(0, user_num - current)
+        header = (
+            f"{progress.hospital_name}-{progress.department} "
+            f"{progress.doctor_name} {progress.clinic_room}"
+        )
 
-        # 判斷是否該通知: 目前號碼 >= 用戶號碼 - 閾值
-        if progress.current_number >= task.user_number - task.threshold:
-            remaining = max(0, task.user_number - progress.current_number)
+        message = None
 
-            if remaining > 0:
-                message = (
-                    f"🔔 您的看診號碼快到了！\n"
-                    f"{progress.hospital_name}-{progress.department} "
-                    f"{progress.doctor_name} {progress.clinic_room}\n"
-                    f"目前看到第 {progress.current_number} 號，您是第 {task.user_number} 號\n"
-                    f"預計還有約 {remaining} 位"
-                )
-            else:
-                message = (
-                    f"🔔 輪到您了！\n"
-                    f"{progress.hospital_name}-{progress.department} "
-                    f"{progress.doctor_name} {progress.clinic_room}\n"
-                    f"目前已看到第 {progress.current_number} 號，您是第 {task.user_number} 號\n"
-                    f"請儘速前往診間！"
-                )
+        # 情境 1: 用戶已過號（目前號碼已超過用戶號碼）
+        if current > user_num:
+            message = (
+                f"⚠️ 您的號碼已過號！\n"
+                f"{header}\n"
+                f"目前看到第 {current} 號，您是第 {user_num} 號\n"
+                f"請儘速前往診間報到"
+            )
+        # 情境 2: 輪到了
+        elif current >= user_num:
+            message = (
+                f"🔔 輪到您了！\n"
+                f"{header}\n"
+                f"目前已看到第 {current} 號，您是第 {user_num} 號\n"
+                f"請儘速前往診間！"
+            )
+        # 情境 3: 快到了（在閾值內）
+        elif current >= user_num - task.threshold:
+            message = (
+                f"🔔 您的看診號碼快到了！\n"
+                f"{header}\n"
+                f"目前看到第 {current} 號，您是第 {user_num} 號\n"
+                f"預計還有約 {remaining} 位"
+            )
 
+        if message:
             try:
                 await self.line_bot.push_message(line_user_id, message)
                 await self.tracker.mark_notified(task.id)
                 logger.info(
                     f"[notifier] 已通知 user={line_user_id} task={task.id} "
-                    f"current={progress.current_number} user_number={task.user_number}"
+                    f"current={current} user_number={user_num}"
                 )
             except Exception as e:
                 logger.error(f"[notifier] 推播失敗 task={task.id}: {e}")

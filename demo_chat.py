@@ -15,7 +15,9 @@ import os
 from datetime import datetime, timezone, timedelta
 from flask import Flask, jsonify, request, render_template_string
 
+import json
 import httpx
+import redis as sync_redis
 from bs4 import BeautifulSoup
 
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +25,11 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 TW_TZ = timezone(timedelta(hours=8))
+
+# Redis 連線（讀取 FastAPI 爬蟲的看診進度快取）
+# 本機開發時 Docker Redis 映射到 6380；Docker 內用 6379
+_redis_url = os.getenv("REDIS_URL", "redis://localhost:6380/0")
+_redis_client = sync_redis.from_url(_redis_url, decode_responses=True)
 
 
 # ================================================================
@@ -90,6 +97,47 @@ def record_history(user_id: str, hospital_code: str, department: str = "", docto
         )
     conn.commit()
     conn.close()
+
+
+def _code_to_name(code: str) -> str:
+    """hospital_code → 顯示名稱"""
+    for alias, (c, name) in HOSPITAL_ALIASES.items():
+        if c == code:
+            return name
+    return code
+
+
+def _main_menu(user_id: str) -> str:
+    """產生主選單，含用戶常用醫院快捷（可輸入數字快速查詢）"""
+    top = get_top_hospitals(user_id, limit=3)
+    if top:
+        recent = "\n".join(f"  {i+1}. {_code_to_name(c)}" for i, c in enumerate(top))
+        # 把快捷對應存到 conversation
+        _conversations.setdefault(user_id, {})["quick_hospitals"] = top
+        return (
+            f"📋 輸入醫院名稱查詢看診進度\n"
+            f"🏥 輸入「醫院」查看支援列表\n\n"
+            f"⭐ 常用醫院（輸入數字快速查詢）：\n{recent}"
+        )
+    return (
+        "📋 輸入醫院名稱查詢看診進度\n"
+        "🏥 輸入「醫院」查看支援列表"
+    )
+
+
+def get_top_hospitals(user_id: str, limit: int = 3) -> list[str]:
+    """取得使用者最常查詢的醫院 code（依 use_count 降序）"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT hospital_code, SUM(use_count) as total FROM user_query_history "
+        "WHERE user_id=? AND hospital_code!='' "
+        "GROUP BY hospital_code ORDER BY total DESC LIMIT ?",
+        (user_id, limit),
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return [row[0] for row in rows]
 
 
 def get_history_counts(user_id: str, hospital_code: str = "", field: str = "department") -> dict[str, int]:
@@ -752,49 +800,76 @@ HOSPITAL_ALIASES = {}
 
 def _build_alias_map():
     """建立別名 → (code, name) 對照表，按別名長度降序排列（長的優先匹配）"""
-    # 已支援的醫院
+    # 已支援的醫院 — alias → (hospital_code, display_name)
+    # hospital_code 對應 FastAPI 爬蟲 AdapterRegistry 的 code
     supported = {
-        "台北長庚": ("1", "台北長庚"),
-        "林口長庚": ("3", "林口長庚"),
-        "高雄長庚": ("8", "高雄長庚"),
-        "新北聯合醫院(板橋)": ("00f8fa51-cedc-4c1d-88b0-58c55f740b79", "新北聯合醫院(板橋)"),
-        "新北聯合醫院(三重)": ("0abdf2d0-3246-4614-b715-d4ed6631eb16", "新北聯合醫院(三重)"),
+        # === 台北市 醫學中心 ===
+        "台大醫院":     ("ntuh", "台大醫院"),
+        "台大":         ("ntuh", "台大醫院"),
+        "臺大":         ("ntuh", "台大醫院"),
+        "臺大醫院":     ("ntuh", "台大醫院"),
+        "三軍總醫院":   ("tsgh", "三軍總醫院"),
+        "三總":         ("tsgh", "三軍總醫院"),
+        "台北榮總":     ("tpvgh", "台北榮總"),
+        "北榮":         ("tpvgh", "台北榮總"),
+        "榮總":         ("tpvgh", "台北榮總"),
+        "台北長庚":     ("changgung-taipei", "台北長庚"),
+        "台北長庚紀念醫院": ("changgung-taipei", "台北長庚"),
+        "國泰醫院":     ("cathay", "國泰醫院"),
+        "國泰":         ("cathay", "國泰醫院"),
+        "馬偕醫院":     ("mackay-taipei", "馬偕醫院(台北)"),
+        "馬偕":         ("mackay-taipei", "馬偕醫院(台北)"),
+        "馬偕台北":     ("mackay-taipei", "馬偕醫院(台北)"),
+        "新光醫院":     ("shinkong", "新光醫院"),
+        "新光":         ("shinkong", "新光醫院"),
+        "萬芳醫院":     ("wanfang", "萬芳醫院"),
+        "萬芳":         ("wanfang", "萬芳醫院"),
+        # === 台北市 區域醫院 ===
+        "台大兒童醫院": ("ntuh-children", "台大兒童醫院"),
+        "台大兒童":     ("ntuh-children", "台大兒童醫院"),
+        "臺大兒童":     ("ntuh-children", "台大兒童醫院"),
+        "振興醫院":     ("chgh", "振興醫院"),
+        "振興":         ("chgh", "振興醫院"),
+        # === 新北市 ===
+        "亞東醫院":     ("femh", "亞東醫院"),
+        "亞東":         ("femh", "亞東醫院"),
+        "台北慈濟":     ("tzuchi-taipei", "台北慈濟醫院"),
+        "台北慈濟醫院": ("tzuchi-taipei", "台北慈濟醫院"),
+        "慈濟新店":     ("tzuchi-xindian", "台北慈濟(新店)"),
+        "馬偕淡水":     ("mackay-tamsui", "馬偕醫院(淡水)"),
+        "衛福部臺北醫院": ("tph", "衛福部臺北醫院"),
+        "臺北醫院":     ("tph", "衛福部臺北醫院"),
+        "汐止國泰":     ("cathay-xizhi", "汐止國泰"),
+        "土城長庚":     ("changgung-tucheng", "土城長庚"),
+        "新北聯合醫院(板橋)": ("newtaipei-banqiao", "新北聯合醫院(板橋)"),
+        "板橋":         ("newtaipei-banqiao", "新北聯合醫院(板橋)"),
+        "新北板橋":     ("newtaipei-banqiao", "新北聯合醫院(板橋)"),
+        "新北聯合醫院(三重)": ("newtaipei-sanchong", "新北聯合醫院(三重)"),
+        "三重":         ("newtaipei-sanchong", "新北聯合醫院(三重)"),
+        "新北三重":     ("newtaipei-sanchong", "新北聯合醫院(三重)"),
+        "輔大醫院":     ("fjuh", "輔大醫院"),
+        "輔大":         ("fjuh", "輔大醫院"),
+        # === 基隆 ===
+        "基隆長庚":     ("changgung-keelung", "基隆長庚"),
+        # === 桃園 ===
+        "林口長庚":     ("changgung-linkou", "林口長庚"),
+        "林口長庚紀念醫院": ("changgung-linkou", "林口長庚"),
+        "長庚":         ("changgung-linkou", "林口長庚"),
+        "桃園長庚":     ("changgung-taoyuan", "桃園長庚"),
+        # === 台中 ===
+        "豐原醫院":     ("fyh-mohw", "衛福部豐原醫院"),
+        "衛福部豐原醫院": ("fyh-mohw", "衛福部豐原醫院"),
+        # === 雲嘉 ===
+        "雲林長庚":     ("changgung-yunlin", "雲林長庚"),
+        "嘉義長庚":     ("changgung-chiayi", "嘉義長庚"),
+        # === 高雄 ===
+        "高雄長庚":     ("changgung-kaohsiung", "高雄長庚"),
+        "高雄長庚紀念醫院": ("changgung-kaohsiung", "高雄長庚"),
+        "鳳山長庚":     ("changgung-fengshan", "鳳山長庚"),
+        "高雄聯合醫院": ("kaohsiung-united", "高雄聯合醫院"),
     }
-    # 尚未支援的醫院（別名可查，但會回應尚未開放）
-    unsupported = {
-        "萬芳醫院": ["萬芳", "萬芳醫院"],
-        "台大醫院": ["台大", "台大醫院", "臺大", "臺大醫院"],
-        "台大兒童醫院": ["台大兒童", "台大兒童醫院", "臺大兒童"],
-        "台北榮總": ["北榮", "台北榮總", "榮總"],
-        "馬偕台北": ["馬偕", "馬偕台北", "馬偕醫院"],
-        "馬偕淡水": ["馬偕淡水"],
-        "國泰醫院": ["國泰", "國泰醫院"],
-        "新光醫院": ["新光", "新光醫院"],
-        "三軍總醫院": ["三總", "三軍總醫院"],
-    }
 
-    alias_map = {}
-    # 已支援
-    for full_name, (code, label) in supported.items():
-        alias_map[full_name] = (code, label)
-    # 長庚別名
-    alias_map["台北長庚紀念醫院"] = ("1", "台北長庚")
-    alias_map["林口長庚紀念醫院"] = ("3", "林口長庚")
-    alias_map["高雄長庚紀念醫院"] = ("8", "高雄長庚")
-    alias_map["長庚"] = ("3", "林口長庚")  # 預設林口
-    # 新北聯合別名
-    alias_map["板橋"] = ("00f8fa51-cedc-4c1d-88b0-58c55f740b79", "新北聯合醫院(板橋)")
-    alias_map["三重"] = ("0abdf2d0-3246-4614-b715-d4ed6631eb16", "新北聯合醫院(三重)")
-    alias_map["新北板橋"] = alias_map["板橋"]
-    alias_map["新北三重"] = alias_map["三重"]
-
-    # 尚未支援
-    for full_name, aliases in unsupported.items():
-        code = f"unsupported:{full_name}"
-        for a in aliases:
-            alias_map[a] = (code, full_name)
-
-    return alias_map
+    return supported
 
 HOSPITAL_ALIASES = _build_alias_map()
 # 按長度降序排列，避免「台大」先匹配到「台大兒童」的問題
@@ -821,26 +896,69 @@ def _resolve_hospital(msg: str):
 
 
 async def _fetch_results(hospital_code: str, hospital_label: str):
-    """根據 hospital_code 抓取看診資料"""
+    """根據 hospital_code 抓取看診資料
+
+    優先從 Redis 快取讀取（FastAPI 爬蟲每 60 秒更新），
+    若 Redis 無資料則回退到直接抓取。
+    """
     # 測試醫院
     if ENABLE_MOCK_HOSPITAL and hospital_code == MOCK_BRANCH_ID:
         return get_mock_results()
 
-    # 長庚
     # 尚未支援的醫院
     if hospital_code.startswith("unsupported:"):
-        return None  # None 表示尚未支援，區別於 [] 表示查無資料
+        return None
 
+    # 從 Redis 讀取 FastAPI 爬蟲快取的看診進度
+    results = _fetch_from_redis(hospital_code)
+    if results is not None:
+        return results
+
+    # 回退：舊的直接抓取邏輯（長庚、新北聯合）
     for key, (branch_id, name) in BRANCHES.items():
         if hospital_code == branch_id:
             return await fetch_changgung(branch_id, name)
 
-    # 新北聯合
     for key, (did, name) in NTPC_DATASETS.items():
         if hospital_code == did:
             return await fetch_newtaipei(did, name)
 
     return []
+
+
+def _fetch_from_redis(hospital_code: str) -> list[dict] | None:
+    """從 Redis 讀取指定醫院的看診進度快取
+
+    Redis key 格式：progress:{hospital_code}:{clinic_room}
+    回傳 list[dict]，無資料回傳 []，Redis 不可用回傳 None（觸發回退）
+    """
+    try:
+        keys = _redis_client.keys(f"progress:{hospital_code}:*")
+        if not keys:
+            return []
+
+        results = []
+        values = _redis_client.mget(keys)
+        for val in values:
+            if not val:
+                continue
+            data = json.loads(val)
+            results.append({
+                "department": data.get("department", ""),
+                "doctor_name": data.get("doctor_name", ""),
+                "clinic_room": data.get("clinic_room", ""),
+                "current_number": data.get("current_number", 0),
+                "next_number": data.get("next_number", 0),
+                "is_current_skipped": data.get("is_current_skipped", False),
+                "is_next_skipped": data.get("is_next_skipped", False),
+                "session": data.get("session", ""),
+                "date": data.get("date", ""),
+            })
+
+        return results
+    except Exception as e:
+        logger.warning(f"[demo_chat] Redis 讀取失敗: {e}")
+        return None  # 回退到直接抓取
 
 
 def _after_result_menu(hospital_label: str, doctor_name: str = "", dept_name: str = "") -> str:
@@ -928,24 +1046,91 @@ def _format_results(results: list[dict], hospital_label: str,
     return "\n".join(lines)
 
 
+def _load_shortcuts() -> dict[str, str]:
+    """從 Redis 讀取快捷指令對照表 {trigger: action}，觸發詞支援逗號分隔多個"""
+    try:
+        data = _redis_client.get("config:shortcuts")
+        if data:
+            import json
+            items = json.loads(data)
+            result = {}
+            for s in items:
+                if not s.get("trigger") or not s.get("action"):
+                    continue
+                for t in s["trigger"].split(","):
+                    t = t.strip().lower()
+                    if t:
+                        result[t] = s["action"]
+            return result
+    except Exception:
+        pass
+    return {}
+
+
 async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
     now = datetime.now(TW_TZ)
     time_str = now.strftime("%m/%d %H:%M")
     msg = msg.strip()
     msg_lower = msg.lower()
 
+    # 快捷指令轉換（從後台設定的 shortcuts）
+    shortcut_map = _load_shortcuts()
+    if msg_lower in shortcut_map:
+        msg = shortcut_map[msg_lower]
+        msg_lower = msg.lower()
+
     conv = get_conv(user_id)
 
     # ====== 全域指令（任何狀態下都能觸發）======
 
+    # 說明 / 幫助
+    if msg in ("說明", "幫助", "help", "使用說明", "功能介紹"):
+        reset_conv(user_id)
+        return (
+            "📖 叮咚到號 — 使用說明\n"
+            "────────────\n"
+            "🔍 查詢進度：直接輸入醫院名\n"
+            "   例如：萬芳、台大、三總\n\n"
+            "🔔 追蹤掛號：查詢後選「追蹤」\n"
+            "   系統會在快到號時通知您\n\n"
+            "📌 快捷指令：\n"
+            "   0 — 回主選單\n"
+            "   00 — 醫院列表\n"
+            "   t — 查看追蹤狀態\n"
+            "   c — 取消追蹤\n"
+            "   h — 顯示此說明\n\n"
+            "🏥 輸入「醫院」查看完整支援列表"
+        )
+
+    # 我的追蹤 / 追蹤狀態
+    if msg in ("我的追蹤", "追蹤列表", "追蹤狀態"):
+        # 讀取 Redis 裡的追蹤資料（透過 LineBotService）
+        from app.services.line_bot import LineBotService
+        svc = LineBotService()
+        return await svc._handle_list_tracks(user_id)
+
+    # 取消追蹤
+    if msg in ("取消追蹤", "停止追蹤"):
+        from app.services.line_bot import LineBotService
+        svc = LineBotService()
+        return await svc._handle_cancel_track(user_id, msg)
+
     # 「重置」/「取消」— 回到初始狀態
     if msg in ("重置", "取消", "返回"):
         reset_conv(user_id)
-        return "✅ 已返回主選單\n\n📋 輸入醫院名稱查詢看診進度\n🏥 輸入「醫院」查看支援列表"
+        return "✅ 已返回主選單\n\n" + _main_menu(user_id)
 
-    # 查詢醫院列表
+    # 常用醫院快捷數字（主選單的 1/2/3）
+    _quick_resolved = None
+    if conv["state"] == "idle" and msg in ("1", "2", "3"):
+        quick = conv.get("quick_hospitals", [])
+        idx = int(msg) - 1
+        if idx < len(quick):
+            _quick_resolved = (quick[idx], _code_to_name(quick[idx]), "")
+
+    # 查詢醫院列表（快捷數字不觸發）
     is_mock_query = ENABLE_MOCK_HOSPITAL and ("測試" in msg or "test" in msg_lower)
-    if not is_mock_query and any(kw in msg for kw in ["醫院", "列表", "有哪些", "支援"]):
+    if not _quick_resolved and not is_mock_query and any(kw in msg for kw in ["醫院", "列表", "有哪些", "支援"]):
         reset_conv(user_id)
         mock_section = ""
         if ENABLE_MOCK_HOSPITAL:
@@ -958,16 +1143,36 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
             )
         return (
             "🏥 目前支援查詢的醫院：\n\n"
-            "【長庚體系】\n"
+            "【台北市】\n"
+            "• 台大醫院、台大兒童醫院\n"
+            "• 三軍總醫院（三總）\n"
+            "• 台北榮總\n"
             "• 台北長庚\n"
-            "• 林口長庚\n"
-            "• 高雄長庚\n\n"
-            "【新北聯合醫院】\n"
-            "• 板橋院區\n"
-            "• 三重院區"
-            f"{mock_section}\n"
+            "• 國泰醫院\n"
+            "• 馬偕醫院（台北）\n"
+            "• 新光醫院\n"
+            "• 萬芳醫院\n"
+            "• 振興醫院\n\n"
+            "【新北市】\n"
+            "• 亞東醫院\n"
+            "• 台北慈濟醫院\n"
+            "• 馬偕醫院（淡水）\n"
+            "• 衛福部臺北醫院\n"
+            "• 汐止國泰\n"
+            "• 土城長庚\n"
+            "• 新北聯合醫院（板橋/三重）\n"
+            "• 輔大醫院\n\n"
+            "【基隆/桃園】\n"
+            "• 基隆長庚、林口長庚、桃園長庚\n\n"
+            "【台中】\n"
+            "• 衛福部豐原醫院\n\n"
+            "【雲嘉/高雄】\n"
+            "• 雲林長庚、嘉義長庚\n"
+            "• 高雄長庚、鳳山長庚\n"
+            "• 高雄聯合醫院"
+            f"{mock_section}\n\n"
             "💡 輸入醫院名稱即可查詢看診進度\n"
-            "💡 可加科別篩選，如：台北長庚 中醫內兒科"
+            "💡 可加科別篩選，如：台大 骨科"
         )
 
     # ====== 有對話狀態時，處理編號選擇 ======
@@ -1018,7 +1223,7 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
 
         if msg in ("3", "返回", "主選單"):
             reset_conv(user_id)
-            return "✅ 已返回主選單\n\n📋 輸入醫院名稱查詢看診進度\n🏥 輸入「醫院」查看支援列表"
+            return "✅ 已返回主選單\n\n" + _main_menu(user_id)
 
         # 不是 1/2/3，嘗試當新查詢處理
         if _resolve_hospital(msg):
@@ -1035,7 +1240,7 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
         # 9 = 返回主選單
         if msg == "9":
             reset_conv(user_id)
-            return "✅ 已返回主選單\n\n📋 輸入醫院名稱查詢看診進度\n🏥 輸入「醫院」查看支援列表"
+            return "✅ 已返回主選單\n\n" + _main_menu(user_id)
 
         # 數字選擇
         if msg.isdigit():
@@ -1128,7 +1333,7 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
         # 9 = 返回主選單
         if msg == "9":
             reset_conv(user_id)
-            return "✅ 已返回主選單\n\n📋 輸入醫院名稱查詢看診進度\n🏥 輸入「醫院」查看支援列表"
+            return "✅ 已返回主選單\n\n" + _main_menu(user_id)
 
         if msg.isdigit():
             idx = int(msg) - 1
@@ -1165,20 +1370,10 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
 
     # ====== idle 狀態：解析醫院名稱 ======
 
-    resolved = _resolve_hospital(msg)
+    resolved = _quick_resolved or _resolve_hospital(msg)
 
     if not resolved:
-        return (
-            "👋 您好！我是叮咚到號小幫手\n\n"
-            "📋 輸入「醫院」查看支援列表\n"
-            "🔍 輸入醫院名稱查詢看診進度\n\n"
-            "例如：\n"
-            "• 台北長庚\n"
-            "• 林口長庚\n"
-            "• 萬芳（或輸入別名如：三總、北榮）\n"
-            "• 板橋\n"
-            "• 三重"
-        )
+        return "👋 您好！我是叮咚到號小幫手\n\n" + _main_menu(user_id)
 
     hospital_code, hospital_label, extra_filter = resolved
 
@@ -1193,7 +1388,7 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
         return (
             f"🏥 {hospital_label}\n\n"
             f"此醫院尚未開放查詢\n"
-            f"目前支援：長庚（台北/林口/高雄）、新北聯合（板橋/三重）\n\n"
+            f"目前支援：台大、三總、北榮、長庚、國泰、馬偕、新光、萬芳、振興、亞東等 29 家\n\n"
             f"更多醫院陸續開放中"
         )
 

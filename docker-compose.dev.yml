@@ -1,6 +1,23 @@
 version: "3.8"
 
 services:
+  # === LINE Bot（測試頻道）===
+  linebot:
+    build: .
+    container_name: ajz-dindon
+    command: uvicorn line_bot:app --host 0.0.0.0 --port 5000 --reload
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env.dev
+    depends_on:
+      - redis
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+      - ./data:/app/data
+    restart: unless-stopped
+
   # === FastAPI 主應用（開發模式）===
   app:
     build: .

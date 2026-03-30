@@ -66,6 +66,18 @@ class LineBotService:
             )
         )
 
+    async def reply(self, reply_token: str, text: str):
+        """回覆訊息（供 webhook 直接呼叫）"""
+        # LINE 訊息上限 5000 字
+        if len(text) > 5000:
+            text = text[:4990] + "\n..."
+        await self.api.reply_message(
+            ReplyMessageRequest(
+                reply_token=reply_token,
+                messages=[TextMessage(text=text)],
+            )
+        )
+
     async def push_message(self, user_id: str, text: str):
         """主動推播訊息給用戶"""
         await self.api.push_message(
@@ -212,13 +224,23 @@ class LineBotService:
         if results:
             p = results[0]
             remaining = user_number - p.current_number
-            reply = (
-                f"已開始追蹤 {hospital_name} "
-                f"{p.department} {p.doctor_name} {p.clinic_room}\n"
-                f"您是第 {user_number} 號\n"
-                f"目前看到第 {p.current_number} 號，還有約 {max(0, remaining)} 位\n"
-                f"快到時會通知您！"
-            )
+            if remaining < 0:
+                # 已過號
+                reply = (
+                    f"⚠️ 您的號碼可能已過號！\n"
+                    f"{hospital_name} {p.department} {p.doctor_name} {p.clinic_room}\n"
+                    f"您是第 {user_number} 號，目前已看到第 {p.current_number} 號\n"
+                    f"請儘速前往診間報到\n\n"
+                    f"已建立追蹤，若號碼有變動會通知您"
+                )
+            else:
+                reply = (
+                    f"已開始追蹤 {hospital_name} "
+                    f"{p.department} {p.doctor_name} {p.clinic_room}\n"
+                    f"您是第 {user_number} 號\n"
+                    f"目前看到第 {p.current_number} 號，還有約 {remaining} 位\n"
+                    f"快到時會通知您！"
+                )
         else:
             desc = " ".join(filter(None, [department, doctor_name, clinic_room]))
             reply = (
