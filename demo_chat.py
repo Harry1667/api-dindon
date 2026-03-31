@@ -1070,14 +1070,21 @@ def _load_shortcuts() -> dict[str, str]:
     return builtin
 
 
+_local_engine = None
+_local_session_factory = None
+
 def _make_local_tracker():
-    """建立使用獨立 engine 的 TrackerService（避免 event loop 問題）"""
-    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+    """建立使用共享 engine 的 TrackerService（快取連線避免每次重建）"""
+    global _local_engine, _local_session_factory
     from app.services.tracker import TrackerService
-    from app.config import settings as _s
-    eng = create_async_engine(_s.database_url, echo=False, pool_size=1)
-    sess = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
-    return TrackerService(session_factory=sess)
+    if _local_engine is None:
+        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+        from app.config import settings as _s
+        _local_engine = create_async_engine(
+            _s.database_url, echo=False, pool_size=2, pool_recycle=3600, pool_pre_ping=True
+        )
+        _local_session_factory = async_sessionmaker(_local_engine, class_=AsyncSession, expire_on_commit=False)
+    return TrackerService(session_factory=_local_session_factory)
 
 
 async def _handle_feedback(msg: str, user_id: str, conv: dict) -> str:
