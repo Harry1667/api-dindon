@@ -4,7 +4,6 @@ services:
   # === FastAPI 主應用（LINE Webhook + Admin）===
   app:
     image: ajz-dindon:latest
-    build: .
     container_name: medqueue-app
     ports:
       - "8000:8000"
@@ -26,7 +25,7 @@ services:
 
   # === Celery Worker（爬蟲任務）===
   worker:
-    build: .
+    image: ajz-dindon:latest
     container_name: medqueue-worker
     command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2 -Q celery
     env_file:
@@ -42,7 +41,7 @@ services:
 
   # === Celery Notify Worker（通知推播，獨立 queue 不被爬蟲擋住）===
   notify:
-    build: .
+    image: ajz-dindon:latest
     container_name: medqueue-notify
     command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=1 -Q notify,celery
     env_file:
@@ -57,7 +56,7 @@ services:
 
   # === Celery Beat（定時排程器）===
   beat:
-    build: .
+    image: ajz-dindon:latest
     container_name: medqueue-beat
     command: celery -A app.tasks.celery_app beat --loglevel=info
     env_file:
