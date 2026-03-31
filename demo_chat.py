@@ -854,7 +854,7 @@ def _build_alias_map():
         # === 桃園 ===
         "林口長庚":     ("changgung-linkou", "林口長庚"),
         "林口長庚紀念醫院": ("changgung-linkou", "林口長庚"),
-        "長庚":         ("changgung-linkou", "林口長庚"),
+        "長庚":         ("__multi_changgung__", "長庚"),
         "桃園長庚":     ("changgung-taoyuan", "桃園長庚"),
         # === 台中 ===
         "豐原醫院":     ("fyh-mohw", "衛福部豐原醫院"),
@@ -1275,13 +1275,18 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
     msg = msg.strip()
     msg_lower = msg.lower()
 
-    # 快捷指令轉換（從後台設定的 shortcuts）
-    shortcut_map = _load_shortcuts()
-    if msg_lower in shortcut_map:
-        msg = shortcut_map[msg_lower]
-        msg_lower = msg.lower()
-
     conv = get_conv(user_id)
+
+    # 快捷指令轉換（從後台設定的 shortcuts）
+    # 但如果用戶在多步驟流程中，只允許 @（返回）和 h（說明），
+    # 避免 c/t/p 等指令打斷流程
+    shortcut_map = _load_shortcuts()
+    in_flow = conv.get("state", "idle") not in ("idle", "")
+    flow_safe_shortcuts = {"@", "0", "#", "h", "help", "主選單", "返回", "00", "列表", "說明", "幫助"}
+    if msg_lower in shortcut_map:
+        if not in_flow or msg_lower in flow_safe_shortcuts:
+            msg = shortcut_map[msg_lower]
+            msg_lower = msg.lower()
 
     # ====== 全域指令（任何狀態下都能觸發）======
 
@@ -1405,6 +1410,23 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
         )
 
     # ====== 有對話狀態時，處理編號選擇 ======
+
+    # 多家醫院選擇
+    if conv["state"] == "choose_hospital":
+        options = conv.get("hospital_options", [])
+        if msg.isdigit():
+            idx = int(msg) - 1
+            if 0 <= idx < len(options):
+                code, name = options[idx]
+                reset_conv(user_id)
+                # 用選中的醫院名重新查詢
+                return await handle_message(name, user_id)
+        # 也接受直接輸入醫院名
+        for code, name in options:
+            if msg in name or name in msg:
+                reset_conv(user_id)
+                return await handle_message(name, user_id)
+        return f"請輸入 1～{len(options)} 選擇醫院\n💡 輸入 @ 返回主選單"
 
     if conv["state"] == "after_result":
         # 使用者剛看完結果，選擇下一步
@@ -1711,9 +1733,46 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
     resolved = _quick_resolved or _resolve_hospital(msg)
 
     if not resolved:
+        # 常見打招呼或閒聊，不當作醫院查詢
+        greetings = {"你好", "嗨", "哈囉", "早安", "午安", "晚安", "hi", "hello", "hey",
+                     "謝謝", "感謝", "好的", "ok", "是的", "對"}
+        has_chinese = any('\u4e00' <= c <= '\u9fff' for c in msg)
+        if has_chinese and len(msg) >= 2 and msg not in greetings:
+            return (
+                f"🔍 找不到「{msg[:20]}」\n\n"
+                f"請確認醫院名稱，或輸入 00 查看支援的醫院\n"
+                f"💡 可用簡稱，如：台大、長庚、馬偕"
+            )
         return "👋 您好！我是叮咚到號小幫手\n\n" + _main_menu(user_id)
 
     hospital_code, hospital_label, extra_filter = resolved
+
+    # 多家醫院匹配：讓用戶選擇
+    MULTI_HOSPITAL_MAP = {
+        "__multi_changgung__": [
+            ("changgung-taipei", "台北長庚"),
+            ("changgung-linkou", "林口長庚"),
+            ("changgung-keelung", "基隆長庚"),
+            ("changgung-taoyuan", "桃園長庚"),
+            ("changgung-tucheng", "土城長庚"),
+            ("changgung-yunlin", "雲林長庚"),
+            ("changgung-chiayi", "嘉義長庚"),
+            ("changgung-kaohsiung", "高雄長庚"),
+            ("changgung-fengshan", "鳳山長庚"),
+        ],
+    }
+    if hospital_code in MULTI_HOSPITAL_MAP:
+        options = MULTI_HOSPITAL_MAP[hospital_code]
+        _conversations[user_id] = {
+            "state": "choose_hospital",
+            "hospital_options": options,
+        }
+        lines = [f"🏥 找到 {len(options)} 家{hospital_label}醫院，請選擇：\n"]
+        for i, (code, name) in enumerate(options, 1):
+            lines.append(f"  {i}. {name}")
+        lines.append(f"\n💡 輸入數字選擇")
+        lines.append(f"💡 輸入 @ 返回主選單")
+        return "\n".join(lines)
 
     # 快速追蹤：「萬芳 下午 303診 8號」「萬芳 診室147 999」（不需要查資料）
     # 匹配：含診間號（\d+診 或 診室\d+ 或 診間\d+）且結尾有數字
@@ -1900,18 +1959,26 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
         f"⏰ {time_str}\n",
     ]
 
+    MAX_DISPLAY = 20  # 一次最多顯示的科別數
+
     if active_depts:
         lines.append(f"看診中（{len(active_depts)} 科）：\n")
-        for i, (dept, count) in enumerate(active_depts, 1):
+        display_active = active_depts[:MAX_DISPLAY]
+        for i, (dept, count) in enumerate(display_active, 1):
             mark = " ⭐" if dept in dept_history else ""
             lines.append(f"  {i}. {dept}（{count}位醫師）{mark}")
+        if len(active_depts) > MAX_DISPLAY:
+            lines.append(f"\n  ...還有 {len(active_depts) - MAX_DISPLAY} 科")
+            lines.append(f"  💡 輸入科別關鍵字篩選，如：骨科、眼科")
 
     if ended_depts:
-        offset = len(active_depts)
-        lines.append(f"\n可能已結束（{len(ended_depts)} 科）：\n")
-        for i, (dept, count) in enumerate(ended_depts, offset + 1):
-            mark = " ⭐" if dept in dept_history else ""
-            lines.append(f"  {i}. {dept}（{count}位）📴{mark}")
+        offset = len(display_active) if active_depts else 0
+        if len(active_depts) <= MAX_DISPLAY:  # 只有科別不多時才顯示已結束的
+            lines.append(f"\n可能已結束（{len(ended_depts)} 科）：\n")
+            display_ended = ended_depts[:max(0, MAX_DISPLAY - len(display_active))]
+            for i, (dept, count) in enumerate(display_ended, offset + 1):
+                mark = " ⭐" if dept in dept_history else ""
+                lines.append(f"  {i}. {dept}（{count}位）📴{mark}")
 
     lines.append(f"\n💡 輸入數字或科別名稱")
     lines.append(f"💡 輸入 @ 返回主選單")
