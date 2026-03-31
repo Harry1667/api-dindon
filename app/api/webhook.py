@@ -71,12 +71,15 @@ async def _handle_event(event):
         logger.info(f"新用戶加入: {user_id}")
         welcome = (
             "👋 歡迎使用叮咚到號！\n\n"
-            "我能幫你即時追蹤醫院看診進度，\n"
-            "快到你的號碼時主動通知你。\n\n"
-            "✨ 試試看：輸入你常去的醫院名稱\n"
-            "例如：台大醫院、長庚、馬偕\n\n"
-            "📋 輸入「說明」查看完整功能"
+            "我能幫你追蹤醫院看診號碼，\n"
+            "快到你的號碼時推播通知你。\n\n"
+            "你現在想做什麼？\n"
+            "1. 🔍 查詢醫院看診進度\n"
+            "2. 📖 看看怎麼使用\n"
+            "3. 🏥 看看支援哪些醫院"
         )
+        # 設定歡迎選單狀態，讓 1/2/3 有意義
+        _conversations[user_id] = {"state": "welcome_menu"}
         await line_bot_service.reply(event.reply_token, welcome)
         await track_event("follow", user_id=user_id)
 
@@ -199,9 +202,14 @@ async def _handle_track_flow(user_id: str, text: str, reply_token: str) -> bool:
         await line_bot_service.reply(reply_token, (
             f"您是第 {conv['track_number']} 號\n\n"
             f"請選擇提醒模式：\n\n"
-            f"  1. 📢 每號提醒 — 每次叫號都通知\n"
-            f"  2. 🔔 輕量提醒 — 剩 10、5、3、1 號時通知（推薦）\n"
-            f"  3. 🔕 最後提醒 — 剩 3 號內才通知"
+            f"1. 📢 每號提醒\n"
+            f"   每次叫號都通知（適合快到號時）\n\n"
+            f"2. 🔔 輕量提醒（推薦）\n"
+            f"   剩 10、5、3、1 號時通知\n"
+            f"   不會一直跳通知打擾你\n\n"
+            f"3. 🔕 最後提醒\n"
+            f"   剩 3 號內才通知\n"
+            f"   適合不想被打擾的人"
         ))
         return True
 
@@ -289,9 +297,12 @@ async def _handle_pretrack_flow(user_id: str, text: str, reply_token: str) -> bo
         await line_bot_service.reply(reply_token, (
             f"您是第 {conv['pretrack_number']} 號\n\n"
             f"請選擇提醒模式：\n\n"
-            f"  1. 📢 每號提醒\n"
-            f"  2. 🔔 輕量提醒（推薦）\n"
-            f"  3. 🔕 最後提醒"
+            f"1. 📢 每號提醒\n"
+            f"   每次叫號都通知\n\n"
+            f"2. 🔔 輕量提醒（推薦）\n"
+            f"   剩 10、5、3、1 號時通知\n\n"
+            f"3. 🔕 最後提醒\n"
+            f"   剩 3 號內才通知"
         ))
         return True
 

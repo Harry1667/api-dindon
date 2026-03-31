@@ -194,10 +194,11 @@ class NotifierService:
         # 輪到了
         if current >= user_num:
             message = (
-                f"🔔 輪到您了！\n"
+                f"🔔 輪到您了！\n\n"
                 f"{header}\n"
-                f"目前已看到第 {current} 號，您是第 {user_num} 號\n"
-                f"請儘速前往診間！"
+                f"目前已看到第 {current} 號，您是第 {user_num} 號\n\n"
+                f"⚡ 請儘速前往診間報到！\n"
+                f"祝看診順利 🙏"
             )
             await self._send_and_finish(task, line_user_id, message, "arrived")
             return

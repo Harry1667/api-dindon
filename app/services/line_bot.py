@@ -303,20 +303,30 @@ class LineBotService:
         if results:
             p = results[0]
             remaining = user_number - p.current_number
+            # 預估等候時間
+            est_min = remaining * 3
+            est_max = remaining * 5
+            est_min = (est_min // 10) * 10  # 取整到 10 分鐘
+            est_max = ((est_max + 9) // 10) * 10
+            est_text = f"⏳ 預估約 {est_min}-{est_max} 分鐘（僅供參考）" if remaining > 0 else "⏳ 即將到號！"
+
             return (
-                f"✅ 追蹤成功！\n"
-                f"{hospital_name} {p.department} {p.doctor_name} {p.clinic_room}\n"
-                f"您是第 {user_number} 號，目前第 {p.current_number} 號\n"
-                f"還有約 {remaining} 位\n"
-                f"模式：{mode_label}"
+                f"✅ 追蹤成功！\n\n"
+                f"🏥 {hospital_name} {p.department} {p.doctor_name} {p.clinic_room}\n"
+                f"🎫 你是第 {user_number} 號，目前第 {p.current_number} 號\n"
+                f"{est_text}\n\n"
+                f"{mode_label}\n\n"
+                f"💡 可以安心離開候診區\n"
+                f"💡 輸入 t 隨時查看進度"
             )
         else:
             return (
-                f"✅ 追蹤成功！\n"
-                f"{hospital_name} {dept} {doctor}\n"
-                f"您是第 {user_number} 號\n"
-                f"模式：{mode_label}\n"
-                f"目前暫無即時資料，有進度時會通知您"
+                f"✅ 追蹤成功！\n\n"
+                f"🏥 {hospital_name} {dept} {doctor}\n"
+                f"🎫 你是第 {user_number} 號\n"
+                f"{mode_label}\n\n"
+                f"目前暫無即時資料，有進度時會通知您\n"
+                f"💡 輸入 t 隨時查看進度"
             )
 
     async def _handle_cancel_track(self, user_id: str, text: str) -> str:
@@ -356,12 +366,33 @@ class LineBotService:
             if progress:
                 p = progress[0]
                 remaining = max(0, t.user_number - p.current_number)
-                if p.current_number >= t.user_number:
-                    lines.append(f"{icon} {desc}\n   🎯 已到號！目前第 {p.current_number} 號")
+                # 預估等候時間
+                est_min = (remaining * 3 // 10) * 10
+                est_max = ((remaining * 5 + 9) // 10) * 10
+                # 上次更新時間
+                from datetime import datetime, timezone, timedelta
+                TW = timezone(timedelta(hours=8))
+                age_sec = (datetime.now(TW) - p.fetched_at.replace(tzinfo=TW)).total_seconds() if p.fetched_at else 0
+                if age_sec < 60:
+                    age_text = "剛剛更新"
+                elif age_sec < 3600:
+                    age_text = f"{int(age_sec // 60)} 分鐘前更新"
                 else:
-                    lines.append(f"{icon} {desc}\n   你是第 {t.user_number} 號，目前第 {p.current_number} 號，還有 {remaining} 位")
+                    age_text = f"{int(age_sec // 3600)} 小時前更新"
+
+                if p.current_number >= t.user_number:
+                    lines.append(f"{icon} {desc}\n   🎯 已到號！目前第 {p.current_number} 號\n   🕐 {age_text}")
+                else:
+                    est_text = f"預估約 {est_min}-{est_max} 分" if remaining > 0 else "即將到號"
+                    lines.append(
+                        f"{icon} {desc}\n"
+                        f"   🎫 你是第 {t.user_number} 號\n"
+                        f"   📍 目前第 {p.current_number} 號（還有 {remaining} 位）\n"
+                        f"   ⏳ {est_text}\n"
+                        f"   🕐 {age_text}"
+                    )
             else:
-                lines.append(f"{icon} {desc}\n   你是第 {t.user_number} 號（暫無即時資料）")
+                lines.append(f"{icon} {desc}\n   🎫 你是第 {t.user_number} 號（暫無即時資料）")
 
         lines.append("\n輸入 c 取消所有追蹤")
         return "\n".join(lines)

@@ -1426,6 +1426,21 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
 
     # ====== 有對話狀態時，處理編號選擇 ======
 
+    # 歡迎選單
+    if conv["state"] == "welcome_menu":
+        if msg == "1":
+            reset_conv(user_id)
+            return "📋 請輸入醫院名稱查詢看診進度\n💡 例如：台大、長庚、馬偕"
+        elif msg == "2":
+            reset_conv(user_id)
+            return await handle_message("說明", user_id)
+        elif msg == "3":
+            reset_conv(user_id)
+            return await handle_message("00", user_id)
+        # 其他輸入也當成查詢
+        reset_conv(user_id)
+        return await handle_message(msg, user_id)
+
     # 多家醫院選擇
     if conv["state"] == "choose_hospital":
         options = conv.get("hospital_options", [])
@@ -1442,6 +1457,19 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
                 reset_conv(user_id)
                 return await handle_message(name, user_id)
         return f"請輸入 1～{len(options)} 選擇醫院\n💡 輸入 @ 返回主選單"
+
+    # 無資料選單
+    if conv["state"] == "no_data_menu":
+        if msg == "1":
+            hosp = conv["hospital_label"]
+            reset_conv(user_id)
+            return await handle_message(hosp, user_id)
+        elif msg == "2":
+            reset_conv(user_id)
+            return "✅ 已返回主選單\n\n" + _main_menu(user_id)
+        # 其他輸入也當成新查詢
+        reset_conv(user_id)
+        return await handle_message(msg, user_id)
 
     if conv["state"] == "after_result":
         # 使用者剛看完結果，選擇下一步
@@ -1748,17 +1776,39 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
     resolved = _quick_resolved or _resolve_hospital(msg)
 
     if not resolved:
-        # 常見打招呼或閒聊，不當作醫院查詢
+        # 常見打招呼或閒聊
         greetings = {"你好", "嗨", "哈囉", "早安", "午安", "晚安", "hi", "hello", "hey",
                      "謝謝", "感謝", "好的", "ok", "是的", "對"}
+        if msg in greetings:
+            conv["_unrecognized"] = 0
+            return "👋 您好！我是叮咚到號小幫手\n\n" + _main_menu(user_id)
+
+        # 追蹤連續無法識別次數
+        unrecognized = conv.get("_unrecognized", 0) + 1
+        conv["_unrecognized"] = unrecognized
+
         has_chinese = any('\u4e00' <= c <= '\u9fff' for c in msg)
-        if has_chinese and len(msg) >= 2 and msg not in greetings:
+
+        # 中文但不是醫院
+        if has_chinese and len(msg) >= 2:
             return (
                 f"🔍 找不到「{msg[:20]}」\n\n"
                 f"請確認醫院名稱，或輸入 00 查看支援的醫院\n"
                 f"💡 可用簡稱，如：台大、長庚、馬偕"
             )
-        return "👋 您好！我是叮咚到號小幫手\n\n" + _main_menu(user_id)
+
+        # 連續 3 次無法識別 → 升級引導
+        if unrecognized >= 3:
+            conv["_unrecognized"] = 0
+            return (
+                "😊 需要幫助嗎？\n\n"
+                "輸入 h 查看使用說明\n"
+                "輸入 00 查看支援的醫院\n"
+                "或直接輸入醫院名稱，例如：台大、長庚"
+            )
+
+        # 純數字/符號/英文
+        return "📋 請輸入醫院名稱查詢看診進度\n💡 例如：台大、長庚、馬偕\n💡 輸入 00 查看支援的醫院"
 
     hospital_code, hospital_label, extra_filter = resolved
 
@@ -1843,13 +1893,20 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
 
     if not results:
         record_history(user_id, hospital_code)
+        _conversations[user_id] = {
+            "state": "no_data_menu",
+            "hospital_code": hospital_code,
+            "hospital_label": hospital_label,
+        }
         return (
             f"🏥 {hospital_label}\n"
             f"⏰ {time_str}\n\n"
             f"目前沒有看診進度資料\n"
             f"（可能尚未開診或資料更新中）\n\n"
-            f"💡 輸入「萬芳 下午 303診 8」可預先追蹤\n"
-            f"💡 輸入 p 設定預約追蹤"
+            f"你可以：\n"
+            f"  1. 稍後再查\n"
+            f"  2. 查詢其他醫院\n\n"
+            f"💡 輸入 p 可設定預約追蹤"
         )
 
     # 解析 extra_filter 中的時段關鍵字
