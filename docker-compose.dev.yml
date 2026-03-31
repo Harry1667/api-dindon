@@ -18,11 +18,25 @@ services:
       - ./data:/app/data
     restart: unless-stopped
 
-  # === Celery Worker ===
+  # === Celery Worker（爬蟲）===
   worker:
     build: .
     container_name: dindon-dev-worker
-    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2 -Q celery
+    env_file:
+      - .env.dev
+    depends_on:
+      - redis
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  # === Celery Notify Worker（通知推播）===
+  notify:
+    build: .
+    container_name: dindon-dev-notify
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=1 -Q notify
     env_file:
       - .env.dev
     depends_on:

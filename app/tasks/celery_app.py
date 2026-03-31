@@ -33,6 +33,11 @@ celery_app.conf.update(
     # 自動發現任務
     include=["app.tasks.scrape", "app.tasks.notify", "app.tasks.nhi_sync", "app.tasks.sync_master_data", "app.tasks.test_scheduler"],
 
+    # 路由：notify 用獨立 queue，不被爬蟲擋住
+    task_routes={
+        "app.tasks.notify.check_and_notify": {"queue": "notify"},
+    },
+
     # 定時排程 (Celery Beat)
     beat_schedule={
         # 每 60 秒抓取看診進度
@@ -40,10 +45,11 @@ celery_app.conf.update(
             "task": "app.tasks.scrape.scrape_all_hospitals",
             "schedule": int(os.getenv("SCRAPE_INTERVAL_SECONDS", "60")),
         },
-        # 每 60 秒檢查通知
+        # 每 60 秒檢查通知（走 notify queue）
         "check-and-notify": {
             "task": "app.tasks.notify.check_and_notify",
             "schedule": int(os.getenv("SCRAPE_INTERVAL_SECONDS", "60")),
+            "options": {"queue": "notify"},
         },
         # 每天凌晨 3 點同步 NHI 醫事機構資料
         "sync-nhi-daily": {

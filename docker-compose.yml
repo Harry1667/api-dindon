@@ -23,11 +23,11 @@ services:
       timeout: 5s
       retries: 3
 
-  # === Celery Worker（執行爬蟲 + 推播任務）===
+  # === Celery Worker（爬蟲任務）===
   worker:
     build: .
     container_name: medqueue-worker
-    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2 -Q celery
     env_file:
       - .env
     extra_hosts:
@@ -38,6 +38,21 @@ services:
     volumes:
       - ./logs:/app/logs
       - ./data:/app/data
+
+  # === Celery Notify Worker（通知推播，獨立 queue 不被爬蟲擋住）===
+  notify:
+    build: .
+    container_name: medqueue-notify
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=1 -Q notify
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - redis
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
 
   # === Celery Beat（定時排程器）===
   beat:
