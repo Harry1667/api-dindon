@@ -75,6 +75,14 @@ async def lifespan(app: FastAPI):
     from app.services.hospital_resolver import hospital_resolver
     await hospital_resolver.load()
 
+    # 預熱 demo_chat 的 DB 連線（避免第一次查追蹤等 2 秒）
+    try:
+        from demo_chat import _warmup_db
+        _warmup_db()
+        logger.info("✅ demo_chat DB 連線預熱完成")
+    except Exception as e:
+        logger.warning(f"⚠️ DB 預熱失敗（不影響功能）: {e}")
+
     yield
 
     # 關閉連線

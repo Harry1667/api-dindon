@@ -1073,6 +1073,10 @@ def _load_shortcuts() -> dict[str, str]:
 _local_engine = None
 _local_session_factory = None
 
+def _warmup_db():
+    """預熱 DB 連線，避免第一次查追蹤時等 2 秒"""
+    _make_local_tracker()
+
 def _make_local_tracker():
     """建立使用共享 engine 的 TrackerService（快取連線避免每次重建）"""
     global _local_engine, _local_session_factory
@@ -1179,7 +1183,11 @@ async def _handle_pretrack_in_chat(msg: str, user_id: str, conv: dict) -> str:
                 f"  2. 下午診\n"
                 f"  3. 夜診"
             )
-        return "找不到此醫院，請重新輸入\n輸入「取消」返回"
+        return (
+            f"🔍 找不到「{msg[:20]}」\n\n"
+            f"請輸入正確的醫院名稱，或輸入 00 查看列表\n"
+            f"💡 輸入「取消」返回"
+        )
 
     # Step 2: 選時段
     if state == "pretrack_session":
@@ -1973,7 +1981,9 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
         display_active = active_depts[:MAX_DISPLAY]
         for i, (dept, count) in enumerate(display_active, 1):
             mark = " ⭐" if dept in dept_history else ""
-            lines.append(f"  {i}. {dept}（{count}位醫師）{mark}")
+            # 截短過長的科別名（去掉「-第二門診六樓」等位置資訊）
+            dept_short = dept.split("-")[0].split("－")[0].strip() if len(dept) > 15 else dept
+            lines.append(f"  {i}. {dept_short}（{count}位醫師）{mark}")
         if len(active_depts) > MAX_DISPLAY:
             lines.append(f"\n  ...還有 {len(active_depts) - MAX_DISPLAY} 科")
             lines.append(f"  💡 輸入科別關鍵字篩選，如：骨科、眼科")
