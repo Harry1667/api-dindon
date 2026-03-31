@@ -24,11 +24,11 @@ services:
       timeout: 5s
       retries: 3
 
-  # === Celery Worker（爬蟲任務）===
+  # === Celery Worker（爬蟲 + 通知 + 排程，合併省記憶體）===
   worker:
     build: .
     container_name: medqueue-worker
-    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2 -Q celery
+    command: celery -A app.tasks.celery_app worker -B --loglevel=info --concurrency=2 -Q celery,notify --max-tasks-per-child=500
     env_file:
       - .env
     extra_hosts:
@@ -40,36 +40,6 @@ services:
       - ./logs:/app/logs
       - ./data:/app/data
 
-  # === Celery Notify Worker（通知推播，獨立 queue 不被爬蟲擋住）===
-  notify:
-    build: .
-    container_name: medqueue-notify
-    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=1 -Q notify,celery
-    env_file:
-      - .env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      - redis
-    restart: unless-stopped
-    volumes:
-      - ./logs:/app/logs
-
-  # === Celery Beat（定時排程器）===
-  beat:
-    build: .
-    container_name: medqueue-beat
-    command: celery -A app.tasks.celery_app beat --loglevel=info
-    env_file:
-      - .env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      - redis
-    restart: unless-stopped
-    volumes:
-      - ./logs:/app/logs
-
   # === Redis（快取 + 任務佇列）===
   redis:
     image: redis:7-alpine
@@ -79,7 +49,7 @@ services:
     volumes:
       - redis_data:/data
     restart: unless-stopped
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --maxmemory 64mb --maxmemory-policy allkeys-lru
 
 volumes:
   redis_data:
