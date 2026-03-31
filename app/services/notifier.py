@@ -49,7 +49,34 @@ class NotifierService:
 
         for task, line_user_id in active_tasks:
             try:
-                # 預約追蹤超過 12 小時沒配到資料 → 自動提醒
+                # --- 過診自動清理 ---
+                # 條件：已通知過 + Redis 無資料 + 建立超過 2 小時
+                # 代表該醫師的診已結束，自動釋放追蹤
+                if (task.last_notified_remaining is not None
+                        and task.created_at
+                        and now - task.created_at > timedelta(hours=2)):
+                    has_data = await self.cache.search_progress(
+                        hospital_code=task.hospital_code,
+                        department=task.department if task.department else None,
+                        doctor_name=task.doctor_name,
+                        clinic_room=task.clinic_room,
+                    )
+                    if not has_data:
+                        from app.scrapers.registry import AdapterRegistry
+                        adapter = AdapterRegistry.get(task.hospital_code)
+                        hosp_name = adapter.hospital_name if adapter else task.hospital_code
+                        desc = f"{hosp_name} {task.department or ''} {task.doctor_name or ''}".strip()
+                        message = (
+                            f"ℹ️ 看診已結束\n"
+                            f"{desc}\n"
+                            f"醫師已無看診資料，追蹤自動結束\n\n"
+                            f"如需再次追蹤，輸入醫院名稱查詢"
+                        )
+                        await self._send_and_finish(task, line_user_id, message, "doctor_gone")
+                        continue
+
+                # --- 預約追蹤超時 ---
+                # 建立超過 12 小時且從未配到資料
                 if (task.last_notified_remaining is None
                         and task.created_at
                         and now - task.created_at > timedelta(hours=12)):
