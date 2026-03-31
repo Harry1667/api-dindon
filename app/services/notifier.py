@@ -195,21 +195,25 @@ class NotifierService:
     def _should_notify(self, mode: str, remaining: int, last_remaining: int | None) -> bool:
         if mode == NotifyMode.NORMAL.value:
             if last_remaining is None:
-                return remaining <= 10
+                return True  # 首次一定通知（讓用戶知道系統在追蹤）
             return remaining != last_remaining
 
         elif mode == NotifyMode.LIGHT.value:
+            if last_remaining is None:
+                return True  # 首次一定通知
             for point in LIGHT_NOTIFY_POINTS:
                 if remaining <= point:
-                    if last_remaining is None or last_remaining > point:
+                    if last_remaining > point:
                         return True
                     break
             return False
 
         elif mode == NotifyMode.FINAL.value:
+            if last_remaining is None:
+                return True  # 首次一定通知
             if remaining > 3:
                 return False
-            if last_remaining is None or last_remaining > 3:
+            if last_remaining > 3:
                 return True
             return remaining != last_remaining and remaining <= 1
 
