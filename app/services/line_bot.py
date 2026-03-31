@@ -327,7 +327,7 @@ class LineBotService:
         return "您目前沒有進行中的追蹤任務。"
 
     async def _handle_list_tracks(self, user_id: str) -> str:
-        """查看追蹤列表"""
+        """查看追蹤列表（含即時進度）"""
         tasks = await self.tracker.get_active_tasks(line_user_id=user_id)
         if not tasks:
             return "您目前沒有進行中的追蹤任務。\n\n查詢醫院後可選擇「追蹤」功能。"
@@ -337,13 +337,31 @@ class LineBotService:
         for t in tasks:
             adapter = AdapterRegistry.get(t.hospital_code)
             hosp_name = adapter.hospital_name if adapter else t.hospital_code
-            desc = f"{hosp_name} {t.department}"
+            icon = mode_icons.get(t.notify_mode, "🔔")
+
+            # 查即時進度
+            progress = await self.cache.search_progress(
+                hospital_code=t.hospital_code,
+                department=t.department if t.department else None,
+                doctor_name=t.doctor_name,
+                clinic_room=t.clinic_room,
+            )
+
+            desc = f"{hosp_name} {t.department or ''}"
             if t.doctor_name:
                 desc += f" {t.doctor_name}"
-            if t.session:
-                desc += f"（{t.session}）"
-            icon = mode_icons.get(t.notify_mode, "🔔")
-            lines.append(f"{icon} {desc} — 第 {t.user_number} 號")
+            if t.clinic_room:
+                desc += f" {t.clinic_room}"
+
+            if progress:
+                p = progress[0]
+                remaining = max(0, t.user_number - p.current_number)
+                if p.current_number >= t.user_number:
+                    lines.append(f"{icon} {desc}\n   🎯 已到號！目前第 {p.current_number} 號")
+                else:
+                    lines.append(f"{icon} {desc}\n   你是第 {t.user_number} 號，目前第 {p.current_number} 號，還有 {remaining} 位")
+            else:
+                lines.append(f"{icon} {desc}\n   你是第 {t.user_number} 號（暫無即時資料）")
 
         lines.append("\n輸入 c 取消所有追蹤")
         return "\n".join(lines)
