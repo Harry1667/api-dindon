@@ -39,23 +39,22 @@ class CacheService:
         try:
             pipe = self.redis.pipeline()
 
-            # 清除該醫院舊資料
-            old_keys = await self.redis.keys(f"progress:{hospital_code}:*")
-            if old_keys:
-                pipe.delete(*old_keys)
+            # 不清除舊資料，只更新有抓到的診間（MERGE 邏輯）
+            # 這樣即使某次爬蟲漏抓某些科別，之前的資料不會消失
+            # 每筆資料有 10 分鐘 TTL，超時自然過期
+            PROGRESS_TTL = 600  # 10 分鐘（2 次爬蟲週期的緩衝）
 
-            # 寫入新資料
+            # 寫入新資料（覆蓋或新增）
             for p in progress_list:
                 key = p.to_cache_key()
-                pipe.set(key, json.dumps(p.to_dict(), ensure_ascii=False), ex=300)
+                pipe.set(key, json.dumps(p.to_dict(), ensure_ascii=False), ex=PROGRESS_TTL)
 
-            # 更新醫院的診間列表索引
-            room_keys = [p.to_cache_key() for p in progress_list]
+            # 更新醫院索引：加入新的 key，不刪除舊的（靠 TTL 自然淘汰）
             index_key = f"index:{hospital_code}"
-            pipe.delete(index_key)
+            room_keys = [p.to_cache_key() for p in progress_list]
             if room_keys:
                 pipe.sadd(index_key, *room_keys)
-                pipe.expire(index_key, 300)
+                pipe.expire(index_key, PROGRESS_TTL)
 
             await pipe.execute()
             logger.info(f"[cache] 已更新 {hospital_code} 共 {len(progress_list)} 筆")
