@@ -38,7 +38,7 @@ ssh "$REMOTE" "
   cd $REMOTE_DIR &&
   git pull origin main &&
   docker load -i /tmp/ajz-dindon.tar &&
-  docker compose -f docker-compose.prod.yml up -d &&
+  docker compose -f docker-compose.yml up -d &&
   rm -f /tmp/ajz-dindon.tar
 "
 

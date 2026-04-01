@@ -12,9 +12,6 @@
 |------|------|------|
 | dindon-deploy | `https://dindon.cleanhome.tw/hooks/dindon-deploy` | LINE Bot 正式環境轉發 |
 | dindon-test | `https://dindon.cleanhome.tw/hooks/dindon-test` | LINE Bot 測試環境轉發 |
-| linebot-agent1 | `https://dindon.cleanhome.tw/hooks/linebot-agent1` | 預留 LINE Bot 功能 |
-| linebot-agent2 | `https://dindon.cleanhome.tw/hooks/linebot-agent2` | 預留 LINE Bot 功能 |
-| linebot-agent3 | `https://dindon.cleanhome.tw/hooks/linebot-agent3` | 預留 LINE Bot 功能 |
 
 **所有 webhook 都需要帶 header：**
 
@@ -57,9 +54,6 @@ adnanh/webhook (port 9000)
 執行腳本
   ├── webhook-dindon-deploy.sh → LINE Bot 正式環境
   ├── webhook-dindon-test.sh   → LINE Bot 測試環境
-  ├── webhook-agent1.sh        → 預留功能 1
-  ├── webhook-agent2.sh        → 預留功能 2
-  └── webhook-agent3.sh        → 預留功能 3
 ```
 
 ---
@@ -74,9 +68,6 @@ adnanh/webhook (port 9000)
 ├── scripts/
 │   ├── webhook-dindon-deploy.sh  # LINE Bot 正式環境
 │   ├── webhook-dindon-test.sh    # LINE Bot 測試環境
-│   ├── webhook-agent1.sh         # 預留功能 1
-│   ├── webhook-agent2.sh         # 預留功能 2
-│   └── webhook-agent3.sh         # 預留功能 3
 └── logs/
     ├── webhook.log               # webhook daemon 日誌
     └── agent.log                 # agent 呼叫日誌

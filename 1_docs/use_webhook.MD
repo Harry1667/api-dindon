@@ -1,134 +1,190 @@
-# Webhook 使用手冊 — 叮咚到號 LINE Bot 轉發
+# Webhook 使用手冊 — LINE Bot 轉發
 
-> 所有 webhook 都是 LINE Bot 訊息轉發端點。
-> 技術設定請參考 [set_webhook.MD](set_webhook.MD)。
-
----
-
-## Webhook 列表
-
-| Webhook | 網址 | 狀態 | 說明 |
-|---------|------|------|------|
-| dindon-deploy | `https://dindon.cleanhome.tw/hooks/dindon-deploy` | 使用中 | LINE Bot 正式環境轉發 |
-| dindon-test | `https://dindon.cleanhome.tw/hooks/dindon-test` | 使用中 | LINE Bot 測試環境轉發 |
-| linebot-agent1 | `https://dindon.cleanhome.tw/hooks/linebot-agent1` | 預留 | 待定義 |
-| linebot-agent2 | `https://dindon.cleanhome.tw/hooks/linebot-agent2` | 預留 | 待定義 |
-| linebot-agent3 | `https://dindon.cleanhome.tw/hooks/linebot-agent3` | 預留 | 待定義 |
+> 本文件教你怎麼新增 chatbot agent 的 webhook 轉發。
+> 基礎設定請參考 [set_webhook.MD](set_webhook.MD)。
 
 ---
 
-## 共用認證
+## 現有端點
 
-所有 webhook 都需要帶 header：
-
-```
-X-Webhook-Secret: NCuHAKTbygEECivqc4IvHx-OH5N7ehnhX28FFee5TLE
-```
-
----
-
-## 呼叫方式
-
-### curl
-
-```bash
-# 正式環境
-curl -X POST https://dindon.cleanhome.tw/hooks/dindon-deploy \
-  -H "X-Webhook-Secret: NCuHAKTbygEECivqc4IvHx-OH5N7ehnhX28FFee5TLE"
-
-# 測試環境
-curl -X POST https://dindon.cleanhome.tw/hooks/dindon-test \
-  -H "X-Webhook-Secret: NCuHAKTbygEECivqc4IvHx-OH5N7ehnhX28FFee5TLE"
-
-# 預留 agent
-curl -X POST https://dindon.cleanhome.tw/hooks/linebot-agent1 \
-  -H "X-Webhook-Secret: NCuHAKTbygEECivqc4IvHx-OH5N7ehnhX28FFee5TLE"
-```
-
-### Python（LINE Bot 內部呼叫）
-
-從 LINE Bot 內部呼叫走內網（localhost），不經 Nginx：
-
-```python
-import httpx
-
-WEBHOOK_SECRET = "NCuHAKTbygEECivqc4IvHx-OH5N7ehnhX28FFee5TLE"
-WEBHOOK_BASE = "http://localhost:9000/hooks"
-HEADERS = {"X-Webhook-Secret": WEBHOOK_SECRET}
-
-async def call_webhook(hook_id: str, data: dict = None):
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(
-            f"{WEBHOOK_BASE}/{hook_id}",
-            headers=HEADERS,
-            json=data,
-        )
-        return r.text
-```
-
-### LINE Developers 設定
-
-在 LINE Developers Console 設定 Webhook URL：
-
-| 環境 | Webhook URL |
-|------|------------|
-| 正式 | `https://dindon.cleanhome.tw/hooks/dindon-deploy` |
-| 測試 | `https://dindon.cleanhome.tw/hooks/dindon-test` |
+| 名稱 | 外網網址 | 內部轉發到 | 說明 |
+|------|---------|-----------|------|
+| dindon-deploy | `https://dindon.cleanhome.tw/hooks/dindon-deploy` | — | LINE Bot 正式環境 |
+| dindon-test | `https://dindon.cleanhome.tw/hooks/dindon-test` | — | LINE Bot 測試環境 |
 
 ---
 
-## 預留 Agent 用途規劃
+## 新增 Chatbot Agent 轉發（Nginx 方式）
 
-3 個預留的 webhook 可用於未來擴充 LINE Bot 功能：
+LINE webhook 需要完整的 raw body + `X-Line-Signature` header 做 HMAC 驗證。
+**不要用 shell script 轉發**，會破壞 body。直接用 Nginx 反代最乾淨。
 
-| Agent | 可能用途 | 範例 |
-|-------|---------|------|
-| linebot-agent1 | 排程通知 | 定時推播看診提醒 |
-| linebot-agent2 | 外部服務串接 | 接收第三方系統回調 |
-| linebot-agent3 | 管理指令 | 管理員遠端操作 |
+### 架構
 
-### 啟用預留 Agent
-
-1. 編輯伺服器上的腳本：
-
-```bash
-ssh aapanel "vi /opt/docker/ajz-dingdon/scripts/webhook-agent1.sh"
+```
+LINE Platform
+  ↓ POST https://dindon.cleanhome.tw/webhook/beauty-salon
+Nginx
+  ↓ proxy_pass（完整轉發 body + 所有 headers）
+http://127.0.0.1:3000/webhook/beauty-salon
 ```
 
-2. 寫入實際邏輯，例如：
+### 步驟
+
+#### 1. 確認你的 chatbot agent 在伺服器上跑起來了
 
 ```bash
-#!/bin/bash
-# linebot-agent1 — 排程通知
-LOG="/opt/docker/ajz-dingdon/logs/agent.log"
-echo "[$(date)] agent1: $1" >> "$LOG"
-
-# 你的邏輯寫在這裡
-# 例如呼叫 LINE Bot API 發送推播
+# 確認 port 有在聽
+ssh aapanel "curl -s http://127.0.0.1:3000/health"
 ```
 
-3. 重啟 webhook daemon：
+#### 2. 加 Nginx 設定
+
+登入 aaPanel → Website → `dindon.cleanhome.tw` → Config
+
+在 `location / {` **上方**加入：
+
+```nginx
+# chatbot-agent: 美容院（轉發到 port 3000）
+location /webhook/beauty-salon {
+    proxy_pass http://127.0.0.1:3000/webhook/beauty-salon;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Line-Signature $http_x_line_signature;
+    proxy_pass_request_body on;
+    proxy_read_timeout 30s;
+}
+```
+
+儲存。Nginx 會自動 reload。
+
+#### 3. 到 LINE Developers 設定 Webhook URL
+
+```
+https://dindon.cleanhome.tw/webhook/beauty-salon
+```
+
+#### 4. 驗證
 
 ```bash
-ssh aapanel "/opt/docker/ajz-dingdon/webhook/start-webhook.sh"
+# 從外網測
+curl -s -X POST https://dindon.cleanhome.tw/webhook/beauty-salon \
+  -H "Content-Type: application/json" \
+  -d '{"events":[]}'
 ```
 
 ---
 
-## 查看日誌
+## 範例：加第二個 agent
+
+假設你有第二個 chatbot 跑在 port 3001，路徑是 `/webhook/clinic`：
+
+```nginx
+# chatbot-agent: 診所（轉發到 port 3001）
+location /webhook/clinic {
+    proxy_pass http://127.0.0.1:3001/webhook/clinic;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Line-Signature $http_x_line_signature;
+    proxy_pass_request_body on;
+    proxy_read_timeout 30s;
+}
+```
+
+LINE Developers Webhook URL：
+```
+https://dindon.cleanhome.tw/webhook/clinic
+```
+
+---
+
+## Nginx 模板（複製貼上改 3 個地方）
+
+```nginx
+# chatbot-agent: __名稱__（轉發到 port __PORT__）
+location /webhook/__路徑__ {
+    proxy_pass http://127.0.0.1:__PORT__/webhook/__路徑__;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Line-Signature $http_x_line_signature;
+    proxy_pass_request_body on;
+    proxy_read_timeout 30s;
+}
+```
+
+要改的地方：
+
+| 佔位符 | 改成 | 範例 |
+|--------|------|------|
+| `__名稱__` | agent 說明 | 美容院 |
+| `__PORT__` | chatbot 服務 port | 3000 |
+| `__路徑__` | webhook 路徑 | beauty-salon |
+
+---
+
+## 完整新增流程 Checklist
+
+```
+□ 1. chatbot agent 在伺服器跑起來（docker 或直接跑）
+□ 2. 確認內部可達：curl http://127.0.0.1:{PORT}/health
+□ 3. 複製 Nginx 模板，改好 3 個佔位符
+□ 4. 貼到 aaPanel → dindon.cleanhome.tw → Config → 儲存
+□ 5. LINE Developers → Webhook URL 填 https://dindon.cleanhome.tw/webhook/{路徑}
+□ 6. 點 Verify → 顯示 Success
+□ 7. 用手機 LINE 傳訊息測試
+```
+
+---
+
+## 常見問題
+
+### Q: 為什麼不用 adnanh/webhook 轉發？
+
+adnanh/webhook 是透過 shell script 執行指令，會把 HTTP body 當參數傳給 script。
+LINE webhook 驗證需要 raw body 做 HMAC-SHA256，經過 shell 轉發後 body 會被改變，
+導致簽名驗證失敗。Nginx 反代是完整轉發，不會動到 body。
+
+### Q: 多個 agent 可以共用同一個域名嗎？
+
+可以。靠路徑區分：
+
+```
+https://dindon.cleanhome.tw/webhook/beauty-salon  → port 3000
+https://dindon.cleanhome.tw/webhook/clinic         → port 3001
+https://dindon.cleanhome.tw/webhook/restaurant     → port 3002
+```
+
+每個 agent 用不同的 LINE Channel，設不同的 Webhook URL。
+
+### Q: 可以用不同域名嗎？
+
+可以。在另一個網站的 Nginx 加同樣的 location 就好：
+
+```
+https://other-domain.com/webhook/xxx → 同一台伺服器的 port 3000
+```
+
+### Q: 怎麼看 agent 有沒有收到請求？
 
 ```bash
-# webhook daemon 日誌（所有 hook 的觸發紀錄）
-ssh aapanel "tail -30 /opt/docker/ajz-dingdon/logs/webhook.log"
+# 看 Nginx access log
+ssh aapanel "tail -20 /www/wwwlogs/dindon.cleanhome.tw.log | grep webhook"
 
-# agent 呼叫日誌
-ssh aapanel "tail -30 /opt/docker/ajz-dingdon/logs/agent.log"
+# 看 chatbot agent 自己的日誌
+ssh aapanel "docker logs {container-name} --tail 20"
 ```
 
 ---
 
 ## 安全提醒
 
-- **Secret 不要外洩**：任何人拿到 secret 都能呼叫所有 webhook
-- **LINE Bot 內部走內網**：用 `http://localhost:9000` 而非外網 URL，避免繞出去再繞回來
-- **每個 agent 可以改成獨立 secret**：在 `hooks.json` 中各設不同 value
+- LINE webhook 的安全性靠 `X-Line-Signature` HMAC 驗證，每個 LINE Channel 有自己的 Channel Secret
+- Nginx 只負責轉發，**不需要額外的 secret header**
+- chatbot agent 自己要驗證 `X-Line-Signature`，不要信任未驗證的請求
+- 建議限制 Nginx 只接受 POST：在 location 裡加 `limit_except POST { deny all; }`
