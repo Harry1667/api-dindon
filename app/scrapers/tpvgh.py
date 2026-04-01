@@ -158,7 +158,13 @@ class TpvghAdapter(BaseHospitalAdapter):
     def _parse_textbox(
         self, li, sect_name: str, date_str: str, session: str, now: datetime
     ) -> ClinicProgressData | None:
-        """解析單一 li.textbox"""
+        """解析單一 li.textbox
+
+        HTML 結構（3 個 <b> 標籤）:
+          <font><b>科別-午別</b></font>   ← bolds[0] (在 font 裡)
+          <b>醫師名　　XXXX診</b>         ← bolds[1]
+          <b>已叫最大號燈：N</b>           ← bolds[2]
+        """
         # 科別名稱
         font = li.find("font")
         department = font.get_text(strip=True) if font else sect_name
@@ -167,14 +173,16 @@ class TpvghAdapter(BaseHospitalAdapter):
         if "門診時間" in department:
             return None
 
-        # 醫師+診間 & 號碼
-        bolds = li.find_all("b")
+        # 找所有 <b>，排除 font 內的（科別標題）
+        all_bolds = li.find_all("b")
+        # 過濾掉在 <font> 裡面的 <b>
+        bolds = [b for b in all_bolds if not b.find_parent("font")]
         if len(bolds) < 2:
             return None
 
-        # 第一個 <b>: "醫師名　　XXXX診"
+        # 第一個非 font 內的 <b>: "醫師名　　XXXX診"
         doctor_room_text = bolds[0].get_text(strip=True)
-        # 第二個 <b>: "已叫最大號燈：N"
+        # 第二個非 font 內的 <b>: "已叫最大號燈：N"
         number_text = bolds[1].get_text(strip=True)
 
         # 解析醫師和診間
