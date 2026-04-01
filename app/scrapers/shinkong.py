@@ -136,17 +136,27 @@ class ShinkongAdapter(BaseHospitalAdapter):
     def _parse_record(
         self, record: dict, division_name: str, date_str: str, now: datetime
     ) -> ClinicProgressData | None:
-        """解析單筆看診進度"""
-        doctor_name = (record.get("DoctorName") or record.get("doctorName") or "").strip()
-        clinic_room = (record.get("ClinicRoom") or record.get("clinicRoom") or "").strip()
-        current_str = str(record.get("CurrentNumber") or record.get("currentNumber") or "0")
-        current_number = int(current_str) if current_str.isdigit() else 0
+        """解析單筆看診進度
 
-        if current_number == 0:
+        API 欄位對應：
+          DoctorName     → 醫師姓名
+          ClinicName     → 診間 (如 "16診")
+          CurrentVisitSeq → 目前看診序號 (字串)
+          NextVisitSeq   → 下一位序號 (字串)
+          ShiftName      → 午別 (如 "上午", "下午")
+        """
+        doctor_name = (record.get("DoctorName", "") or "").strip()
+        clinic_room = (record.get("ClinicName", "") or "").strip()
+        current_str = str(record.get("CurrentVisitSeq", "0") or "0")
+        current_number = int(current_str) if current_str.isdigit() else 0
+        next_str = str(record.get("NextVisitSeq", "0") or "0")
+        next_number = int(next_str) if next_str.isdigit() else current_number + 1
+
+        if current_number == 0 and next_number == 0:
             return None
 
         # 午別
-        session_raw = (record.get("Session") or record.get("session") or "").strip()
+        session_raw = (record.get("ShiftName", "") or "").strip()
         if "上午" in session_raw or "morning" in session_raw.lower():
             session = "上午診"
         elif "下午" in session_raw or "afternoon" in session_raw.lower():
@@ -165,7 +175,7 @@ class ShinkongAdapter(BaseHospitalAdapter):
             doctor_name=doctor_name,
             clinic_room=clinic_room or division_name,
             current_number=current_number,
-            next_number=current_number + 1,
+            next_number=next_number if next_number > 0 else current_number + 1,
             is_current_skipped=False,
             is_next_skipped=False,
             fetched_at=now,
