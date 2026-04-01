@@ -131,123 +131,64 @@ class ChghAdapter(BaseHospitalAdapter):
         else:
             session = "夜診"
 
-        # 找含看診資料的 card 或 div
-        # 振興的 card 結構: card-panel 內有診間/醫師/號碼
-        cards = soup.select(".card-panel")
-        for card in cards:
-            try:
-                progress = self._parse_card(card, dept_name, date_str, session, now)
-                if progress:
-                    results.append(progress)
-            except Exception as e:
-                logger.warning(f"[{self.hospital_code}] 解析卡片失敗: {e}")
+        # 振興的 card-panel 內有 table，固定 5 欄:
+        #   [0] 午別 (上午診/下午診/夜診)
+        #   [1] 科別名稱 (含診間號如 "胃腸肝膽科002診")
+        #   [2] 診間號 (如 "002")
+        #   [3] 醫生姓名
+        #   [4] 現在序號
+        for table in soup.find_all("table"):
+            rows = table.find_all("tr")
+            for row in rows:
+                cells = row.find_all("td")
+                if len(cells) < 5:
+                    continue
 
-        # fallback: 找 table
-        if not results:
-            for table in soup.find_all("table"):
-                rows = table.find_all("tr")
-                for row in rows[1:]:
-                    cells = row.find_all("td")
-                    if len(cells) < 3:
-                        continue
-                    texts = [c.get_text(strip=True) for c in cells]
+                texts = [c.get_text(strip=True) for c in cells]
 
-                    doctor = ""
-                    clinic_room = ""
-                    current_number = 0
+                # 跳過 header
+                if "午別" in texts[0] or "醫生" in texts[3]:
+                    continue
 
-                    for t in texts:
-                        nums = re.findall(r"^\d+$", t)
-                        if nums and current_number == 0:
-                            current_number = int(nums[0])
-                        elif re.match(r"^\d+診$", t):
-                            clinic_room = t
-                        elif len(t) >= 2 and len(t) <= 10 and not doctor:
-                            doctor = t
+                # 從午別欄位取得更精確的 session
+                session_text = texts[0]
+                if "上午" in session_text:
+                    row_session = "上午診"
+                elif "下午" in session_text:
+                    row_session = "下午診"
+                elif "夜" in session_text:
+                    row_session = "夜診"
+                else:
+                    row_session = session
 
-                    if current_number > 0:
-                        results.append(
-                            ClinicProgressData(
-                                hospital_code=self.hospital_code,
-                                hospital_name=self.hospital_name,
-                                date=date_str,
-                                session=session,
-                                department=dept_name,
-                                doctor_name=doctor,
-                                clinic_room=clinic_room or dept_name,
-                                current_number=current_number,
-                                next_number=current_number + 1,
-                                is_current_skipped=False,
-                                is_next_skipped=False,
-                                fetched_at=now,
-                            )
-                        )
+                clinic_room = texts[2].strip()  # 診間號
+                doctor = texts[3].strip()       # 醫生姓名
 
-        # fallback: 找 span/div 中的數字模式
-        if not results:
-            for span in soup.find_all(["span", "div"]):
-                text = span.get_text(strip=True)
-                # 常見模式: "醫師名 XXX診 目前看診號: NN"
-                match = re.search(
-                    r"(.{2,6})\s+(\d+診)\s+.*?(\d+)", text
-                )
-                if match:
-                    results.append(
-                        ClinicProgressData(
-                            hospital_code=self.hospital_code,
-                            hospital_name=self.hospital_name,
-                            date=date_str,
-                            session=session,
-                            department=dept_name,
-                            doctor_name=match.group(1),
-                            clinic_room=match.group(2),
-                            current_number=int(match.group(3)),
-                            next_number=int(match.group(3)) + 1,
-                            is_current_skipped=False,
-                            is_next_skipped=False,
-                            fetched_at=now,
-                        )
+                # 現在序號（可能在 span 裡）
+                num_match = re.search(r"(\d+)", texts[4])
+                current_number = int(num_match.group(1)) if num_match else 0
+
+                if current_number == 0 or not doctor:
+                    continue
+
+                results.append(
+                    ClinicProgressData(
+                        hospital_code=self.hospital_code,
+                        hospital_name=self.hospital_name,
+                        date=date_str,
+                        session=row_session,
+                        department=dept_name,
+                        doctor_name=doctor,
+                        clinic_room=f"{clinic_room}診" if clinic_room.isdigit() else clinic_room,
+                        current_number=current_number,
+                        next_number=current_number + 1,
+                        is_current_skipped=False,
+                        is_next_skipped=False,
+                        fetched_at=now,
                     )
+                )
 
         return results
-
-    def _parse_card(self, card, dept_name, date_str, session, now):
-        """解析 card-panel"""
-        text = card.get_text(separator="\n", strip=True)
-        lines = [l.strip() for l in text.split("\n") if l.strip()]
-        if len(lines) < 3:
-            return None
-
-        doctor = ""
-        clinic_room = ""
-        current_number = 0
-
-        for line in lines:
-            nums = re.findall(r"\d+", line)
-            if re.match(r"^\d+診$", line):
-                clinic_room = line
-            elif nums and len(line) < 8 and current_number == 0:
-                current_number = int(nums[0])
-            elif len(line) >= 2 and len(line) <= 10 and not doctor:
-                doctor = line
-
-        if current_number == 0:
-            return None
-
-        return ClinicProgressData(
-            hospital_code=self.hospital_code,
-            hospital_name=self.hospital_name,
-            date=date_str,
-            session=session,
-            department=dept_name,
-            doctor_name=doctor,
-            clinic_room=clinic_room or dept_name,
-            current_number=current_number,
-            next_number=current_number + 1,
-            is_current_skipped=False,
-            is_next_skipped=False,
-            fetched_at=now,
-        )
 
     async def get_departments(self) -> list[str]:
         headers = {
