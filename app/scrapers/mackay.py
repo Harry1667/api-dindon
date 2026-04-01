@@ -99,70 +99,55 @@ class MackayAdapter(BaseHospitalAdapter):
     def _parse_html(
         self, html: str, dept_code: str, ap: str, now: datetime
     ) -> list[ClinicProgressData]:
-        """解析看診進度頁面"""
+        """解析看診進度頁面
+
+        馬偕 HTML table 固定 5 欄:
+          [0] 位置      (如 "馬偕樓 02樓 213室")
+          [1] 診別      (如 "內分03診")
+          [2] 醫師      (如 "簡銘男")
+          [3] 目前看診號 (如 "71號" 或 "過號71號")
+          [4] 未看診人數 (如 "37人")
+        """
         soup = BeautifulSoup(html, "html.parser")
         date_str = now.strftime("%Y/%m/%d")
         session = TIME_CODES.get(ap, "未知")
         dept_name = MACKAY_DEPTS.get(dept_code, dept_code)
         results = []
 
-        # 找所有 table rows（看診資料通常在 table 中）
-        tables = soup.find_all("table")
-        for table in tables:
+        for table in soup.find_all("table"):
             rows = table.find_all("tr")
             for row in rows:
                 cells = row.find_all("td")
-                if len(cells) < 3:
+                if len(cells) < 5:
                     continue
 
                 texts = [c.get_text(strip=True) for c in cells]
 
-                # 過濾 header 行
-                if any(kw in texts[0] for kw in ["診間", "醫師", "科別"]):
+                # 跳過 header 行
+                if any(kw in texts[0] for kw in ["位置", "診間", "醫師", "科別"]):
                     continue
 
-                # 嘗試解析：常見格式是 診間/醫師/目前號碼 或 醫師/診間/號碼
-                doctor = ""
-                clinic_room = ""
-                current_number = 0
-                is_stopped = False
-
-                for text in texts:
-                    if "已停診" in text or "[已停診]" in text:
-                        is_stopped = True
-                    nums = re.findall(r"\d+", text)
-                    if nums and not doctor:
-                        # 可能是號碼
-                        pass
-
-                # 更通用的解析：找含數字的 cell 作為號碼
-                num_cells = []
-                text_cells = []
-                for text in texts:
-                    nums = re.findall(r"\d+", text)
-                    if nums and len(text) < 10:
-                        num_cells.append((int(nums[0]), "過號" in text))
-                    else:
-                        text_cells.append(text)
-
-                if not num_cells or is_stopped:
+                # 跳過已停診
+                if any("已停診" in t for t in texts):
                     continue
 
-                # 文字欄位：第一個像醫師名，第二個像診間
-                if len(text_cells) >= 2:
-                    doctor = text_cells[0]
-                    clinic_room = text_cells[1]
-                elif text_cells:
-                    doctor = text_cells[0]
-                    clinic_room = dept_name
+                clinic_room = texts[1]   # 診別 (如 "內分03診")
+                doctor = texts[2]        # 醫師
+                current_text = texts[3]  # "71號" 或 "過號71號"
+                waiting_text = texts[4]  # "37人"
 
-                current_number = num_cells[0][0]
-                is_current_skipped = num_cells[0][1]
-                next_number = num_cells[1][0] if len(num_cells) > 1 else current_number + 1
-                is_next_skipped = num_cells[1][1] if len(num_cells) > 1 else False
+                # 解析目前看診號
+                is_current_skipped = "過號" in current_text
+                num_match = re.search(r"(\d+)", current_text)
+                current_number = int(num_match.group(1)) if num_match else 0
 
                 if current_number == 0:
                     continue
+
+                # 解析未看診人數 → 推算 next_number
+                wait_match = re.search(r"(\d+)", waiting_text)
+                waiting = int(wait_match.group(1)) if wait_match else 0
+                next_number = current_number + waiting
 
                 results.append(ClinicProgressData(
                     hospital_code=self.hospital_code,
@@ -175,7 +160,7 @@ class MackayAdapter(BaseHospitalAdapter):
                     current_number=current_number,
                     next_number=next_number,
                     is_current_skipped=is_current_skipped,
-                    is_next_skipped=is_next_skipped,
+                    is_next_skipped=False,
                     fetched_at=now,
                 ))
 
