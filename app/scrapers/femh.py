@@ -201,13 +201,23 @@ class FemhAdapter(BaseHospitalAdapter):
     def _parse_html(
         self, html: str, dept_name: str, session_code: str, now: datetime
     ) -> list[ClinicProgressData]:
-        """解析看診進度"""
+        """解析看診進度
+
+        亞東 HTML table 固定 8 欄:
+          [0] 看診日期   (如 "115/04/01(星期三)")
+          [1] 時段      (如 "早上")
+          [2] 看診科別   (如 "一般外科")
+          [3] 診間      (如 "F211")
+          [4] 看診醫師   (如 "趙余俊")
+          [5] 掛號人數   (如 "28")
+          [6] 下一號    (如 "4")
+          [7] 目前看診號  (如 "35號...")
+        """
         soup = BeautifulSoup(html, "html.parser")
         date_str = now.strftime("%Y/%m/%d")
         session = SESSION_MAP.get(session_code, "未知")
         results = []
 
-        # 找 tab1 區域的 table
         tab1 = soup.find(id="order-tab1")
         search_area = tab1 if tab1 else soup
 
@@ -217,48 +227,48 @@ class FemhAdapter(BaseHospitalAdapter):
                 continue
 
             for row in rows[1:]:
+                # 跳過展開用的 collapse 行
+                row_class = row.get("class", [])
+                if "collapse" in row_class or "row-collapse" in row_class:
+                    continue
+
                 cells = row.find_all("td")
-                if len(cells) < 3:
+                if len(cells) < 8:
                     continue
 
                 texts = [c.get_text(strip=True) for c in cells]
 
-                doctor = ""
-                clinic_room = ""
-                current_number = 0
+                clinic_room = texts[3]   # 診間
+                doctor = texts[4]        # 看診醫師
 
-                for text in texts:
-                    if not text:
-                        continue
-                    if re.match(r"^\d+$", text) and current_number == 0:
-                        current_number = int(text)
-                    elif re.match(r"^\d+診?$", text) and not clinic_room:
-                        clinic_room = text
-                    elif (
-                        "科" not in text
-                        and len(text) >= 2
-                        and len(text) <= 10
-                        and not doctor
-                    ):
-                        doctor = text
+                # 目前看診號（可能帶 "號" 字尾或 "..."）
+                current_match = re.search(r"(\d+)", texts[7])
+                current_number = int(current_match.group(1)) if current_match else 0
 
-                if current_number > 0:
-                    results.append(
-                        ClinicProgressData(
-                            hospital_code=self.hospital_code,
-                            hospital_name=self.hospital_name,
-                            date=date_str,
-                            session=session,
-                            department=dept_name,
-                            doctor_name=doctor,
-                            clinic_room=clinic_room or dept_name,
-                            current_number=current_number,
-                            next_number=current_number + 1,
-                            is_current_skipped=False,
-                            is_next_skipped=False,
-                            fetched_at=now,
-                        )
+                if current_number == 0 or not doctor:
+                    continue
+
+                # 掛號人數 → next_number
+                registered_match = re.search(r"(\d+)", texts[5])
+                registered = int(registered_match.group(1)) if registered_match else 0
+                next_number = registered if registered > current_number else current_number + 1
+
+                results.append(
+                    ClinicProgressData(
+                        hospital_code=self.hospital_code,
+                        hospital_name=self.hospital_name,
+                        date=date_str,
+                        session=session,
+                        department=dept_name,
+                        doctor_name=doctor,
+                        clinic_room=clinic_room or dept_name,
+                        current_number=current_number,
+                        next_number=next_number,
+                        is_current_skipped=False,
+                        is_next_skipped=False,
+                        fetched_at=now,
                     )
+                )
 
         return results
 
