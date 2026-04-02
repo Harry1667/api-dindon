@@ -832,6 +832,21 @@ def _build_alias_map():
         "台大兒童醫院": ("ntuh-children", "台大兒童醫院"),
         "台大兒童":     ("ntuh-children", "台大兒童醫院"),
         "臺大兒童":     ("ntuh-children", "台大兒童醫院"),
+        "台大北護分院": ("ntuh-beihu", "台大北護分院"),
+        "台大北護":     ("ntuh-beihu", "台大北護分院"),
+        "北護分院":     ("ntuh-beihu", "台大北護分院"),
+        "台大金山分院": ("ntuh-jinshan", "台大金山分院"),
+        "台大金山":     ("ntuh-jinshan", "台大金山分院"),
+        "金山分院":     ("ntuh-jinshan", "台大金山分院"),
+        "新竹台大分院": ("ntuh-hsinchu", "新竹台大分院"),
+        "新竹台大":     ("ntuh-hsinchu", "新竹台大分院"),
+        "新竹臺大":     ("ntuh-hsinchu", "新竹台大分院"),
+        "新竹台大生醫": ("ntuh-biomedical", "新竹台大生醫"),
+        "台大生醫":     ("ntuh-biomedical", "新竹台大生醫"),
+        "生醫醫院":     ("ntuh-biomedical", "新竹台大生醫"),
+        "台大雲林分院": ("ntuh-yunlin", "台大雲林分院"),
+        "台大雲林":     ("ntuh-yunlin", "台大雲林分院"),
+        "雲林台大":     ("ntuh-yunlin", "台大雲林分院"),
         "振興醫院":     ("chgh", "振興醫院"),
         "振興":         ("chgh", "振興醫院"),
         # === 新北市 ===
@@ -1403,7 +1418,7 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
         return (
             "🏥 目前支援查詢的醫院：\n\n"
             "【台北市】\n"
-            "• 台大醫院、台大兒童醫院、台大癌醫\n"
+            "• 台大醫院、台大兒童、台大癌醫、台大北護\n"
             "• 三軍總醫院（三總）\n"
             "• 台北榮總\n"
             "• 台北長庚\n"
@@ -1413,6 +1428,7 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
             "• 萬芳醫院\n"
             "• 振興醫院\n\n"
             "【新北市】\n"
+            "• 台大金山分院\n"
             "• 亞東醫院\n"
             "• 台北慈濟醫院\n"
             "• 馬偕醫院（淡水）\n"
@@ -1423,9 +1439,12 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
             "• 輔大醫院\n\n"
             "【基隆/桃園】\n"
             "• 基隆長庚、林口長庚、桃園長庚\n\n"
+            "【新竹】\n"
+            "• 新竹台大分院、新竹台大生醫\n\n"
             "【台中】\n"
             "• 衛福部豐原醫院\n\n"
             "【雲嘉/高雄】\n"
+            "• 台大雲林分院\n"
             "• 雲林長庚、嘉義長庚\n"
             "• 高雄長庚、鳳山長庚\n"
             "• 高雄聯合醫院"

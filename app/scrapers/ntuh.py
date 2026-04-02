@@ -33,7 +33,7 @@ NTUH_DEPTS = [
     "SURG", "ORTH", "OBGY", "OPH", "ENT", "DENT", "DERM", "URO",
 ]
 
-# 台大癌醫科別代碼
+# 台大癌醫科別代碼（C0）
 NTUCC_DEPTS = [
     "ME03", "ME04", "ME12", "ME10", "ME07", "ME02", "ME08", "ME06",
     "ME09", "ME05", "ME11", "ME15",  # 內科系
@@ -41,6 +41,40 @@ NTUCC_DEPTS = [
     "SR03", "SR02", "SR07", "SR04", "SR05", "SR08", "SR06",  # 外科系
     "SU04", "SU06", "SU07", "SU02", "SU08", "SU01", "SU05", "SU09",  # 外科
     "KBRC",  # 乳房醫學中心
+]
+
+# 北護分院（T2）
+NTUH_BEIHU_DEPTS = [
+    "MED", "PED", "FM", "NEUR", "PMR", "PSYC",
+    "SURG", "ORTH", "OBGY", "OPH", "DERM", "ENT", "DENT", "URO",
+]
+
+# 金山分院（T3）
+NTUH_JINSHAN_DEPTS = [
+    "MED", "PED", "GERO", "FM", "NEUR", "PMR", "PSYC",
+    "SURG", "ORTH", "OBGY", "OPH", "ENT", "DENT", "DERM", "URO",
+]
+
+# 新竹臺大分院（T4）
+NTUH_HSINCHU_DEPTS = [
+    "MED", "PED", "FM", "EOM", "PMR", "PSYC", "NEUR", "ONC", "GERO",
+    "SURG", "ORTH", "OBGY", "ENT", "URO", "OPH", "DENT", "DERM",
+]
+
+# 新竹臺大生醫醫院（T7）
+NTUH_BIOMEDICAL_DEPTS = [
+    "MEDV", "PEDV", "FMV", "PMRV", "PSYV", "NEUV", "ONCV", "GERV",
+    "SURV", "ORTV", "OBGV", "ENTV", "UROV", "OPHV", "DENV", "DERV",
+    "KBRV",
+]
+
+# 雲林分院（Y0）
+NTUH_YUNLIN_DEPTS = [
+    "MED", "SURG", "FM", "NEUR", "ORTH", "URO", "OBGY", "PED",
+    "OPH", "ENT", "DERM", "PMR", "PSYC", "DENT", "ONC",
+    # 虎尾院區
+    "HMED", "HSUR", "HFM", "HNEU", "HORT", "HURO", "HOBG", "HPED",
+    "HOPH", "HENT", "HDER", "HPMR", "HPSY", "HDEN", "HONC",
 ]
 TIME_CODES = ["1", "2", "3"]
 TIME_NAMES = {"1": "上午診", "2": "下午診", "3": "夜診"}
@@ -197,7 +231,12 @@ class NtuhAdapter(BaseHospitalAdapter):
         return [d for d in self.depts]
 
 
-# === 預建院區 ===
+# === 預建院區（8 院區）===
 ntuh_main = NtuhAdapter("ntuh", "台大醫院", "T0")
 ntuh_children = NtuhAdapter("ntuh-children", "台大兒童醫院", "CH")
 ntuh_cancer = NtuhAdapter("ntuh-cancer", "台大癌醫", "C0", depts=NTUCC_DEPTS)
+ntuh_beihu = NtuhAdapter("ntuh-beihu", "台大北護分院", "T2", depts=NTUH_BEIHU_DEPTS)
+ntuh_jinshan = NtuhAdapter("ntuh-jinshan", "台大金山分院", "T3", depts=NTUH_JINSHAN_DEPTS)
+ntuh_hsinchu = NtuhAdapter("ntuh-hsinchu", "新竹台大分院", "T4", depts=NTUH_HSINCHU_DEPTS)
+ntuh_biomedical = NtuhAdapter("ntuh-biomedical", "新竹台大生醫", "T7", depts=NTUH_BIOMEDICAL_DEPTS)
+ntuh_yunlin = NtuhAdapter("ntuh-yunlin", "台大雲林分院", "Y0", depts=NTUH_YUNLIN_DEPTS)
