@@ -12,10 +12,7 @@ from app.scrapers.changgung import (
     yunlin_changgung, chiayi_changgung, kaohsiung_changgung, fengshan_changgung,
     tucheng_changgung,
 )
-from app.scrapers.ntuh import (
-    ntuh_main, ntuh_children, ntuh_cancer,
-    ntuh_beihu, ntuh_jinshan, ntuh_hsinchu, ntuh_biomedical, ntuh_yunlin,
-)
+from app.scrapers.ntuh import ntuh_main, ntuh_children, ntuh_cancer
 from app.scrapers.mackay import mackay_taipei, mackay_tamsui
 from app.scrapers.tpvgh import TpvghAdapter
 from app.scrapers.cathay import CathayAdapter, cathay_xizhi
@@ -51,7 +48,9 @@ class AdapterRegistry:
 
 
 # ============================================================
-# 註冊所有 Adapter（共 34 家）
+# 註冊所有 Adapter（共 29 家）
+# 台大分院（北護/金山/新竹/生醫/雲林）程式碼保留在 ntuh.py，
+# 但暫不註冊，節省 1.9GiB 機器的記憶體。需要時取消註解即可。
 # ============================================================
 
 # --- 台北市 醫學中心 ---
@@ -68,11 +67,9 @@ if settings.enable_wanfang_scraper:
 # --- 台北市 區域醫院 ---
 AdapterRegistry.register(ntuh_cancer)                  # 台大癌醫
 AdapterRegistry.register(ntuh_children)                # 台大兒童醫院
-AdapterRegistry.register(ntuh_beihu)                   # 台大北護分院
 AdapterRegistry.register(ChghAdapter())                # 振興醫院
 
 # --- 新北市 ---
-AdapterRegistry.register(ntuh_jinshan)                 # 台大金山分院
 AdapterRegistry.register(FemhAdapter())                # 亞東醫院
 AdapterRegistry.register(tzuchi_taipei)                # 台北慈濟醫院
 AdapterRegistry.register(tzuchi_xindian)               # 台北慈濟(新店)
@@ -91,15 +88,10 @@ AdapterRegistry.register(keelung_changgung)            # 基隆長庚
 AdapterRegistry.register(linkou_changgung)             # 林口長庚
 AdapterRegistry.register(taoyuan_changgung)            # 桃園長庚
 
-# --- 新竹 ---
-AdapterRegistry.register(ntuh_hsinchu)                 # 新竹台大分院
-AdapterRegistry.register(ntuh_biomedical)              # 新竹台大生醫
-
 # --- 台中 ---
 AdapterRegistry.register(fyh_adapter)                  # 衛福部豐原醫院
 
 # --- 雲嘉 ---
-AdapterRegistry.register(ntuh_yunlin)                  # 台大雲林分院
 AdapterRegistry.register(yunlin_changgung)             # 雲林長庚
 AdapterRegistry.register(chiayi_changgung)             # 嘉義長庚
 

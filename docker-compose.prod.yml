@@ -27,7 +27,7 @@ services:
   worker:
     image: ajz-dindon:latest
     container_name: medqueue-worker
-    command: celery -A app.tasks.celery_app worker -B --loglevel=info --concurrency=2 -Q celery,notify --max-tasks-per-child=500
+    command: celery -A app.tasks.celery_app worker -B --loglevel=info --concurrency=1 -Q celery,notify --max-tasks-per-child=500
     env_file:
       - .env
     extra_hosts:
