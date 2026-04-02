@@ -28,6 +28,49 @@ logger = logging.getLogger(__name__)
 
 TW_TZ = timezone(timedelta(hours=8))
 
+# 科別代碼 → 中文名稱（合併所有院區）
+DEPT_NAMES = {
+    # 台大本院 (T0)
+    "MED": "內科部", "GERO": "老年醫學部", "FM": "家庭醫學部",
+    "NEUR": "神經部", "GENE": "基因醫學部", "PMR": "復健部",
+    "ONC": "腫瘤醫學部", "PSYC": "精神部", "EOM": "環境暨職業醫學部",
+    "SURG": "外科部", "ORTH": "骨科部", "OBGY": "婦產部",
+    "OPH": "眼科部", "ENT": "耳鼻喉部", "DENT": "口腔醫學部",
+    "DERM": "皮膚部", "URO": "泌尿部", "PED": "小兒部",
+    "PC": "麻醉部", "KBRC": "乳房醫學中心", "NUTR": "營養室",
+    "RAD": "影像醫學部", "ACP": "預立醫療照護諮商",
+    # 癌醫中心 (C0)
+    "ME02": "心臟科", "ME03": "胸腔科", "ME04": "消化科",
+    "ME05": "腎臟科", "ME06": "神經科", "ME07": "身心科",
+    "ME08": "內分泌科", "ME09": "免疫科", "ME10": "感染科",
+    "ME11": "復健科", "ME12": "家醫暨緩和醫療科", "ME15": "一般內科",
+    "ONCR": "腫瘤內科部", "HEMA": "血液腫瘤部", "RT": "放射腫瘤部",
+    "SR02": "眼科", "SR03": "牙科", "SR04": "整形外科",
+    "SR05": "神經外科", "SR06": "婦科", "SR07": "皮膚科",
+    "SR08": "心臟血管外科", "ANE": "麻醉部",
+    "SU01": "一般外科", "SU02": "耳鼻喉科", "SU04": "胸腔外科",
+    "SU05": "上消化道腫瘤外科", "SU06": "肝膽胰腫瘤外科",
+    "SU07": "大腸直腸外科", "SU08": "泌尿科", "SU09": "骨科",
+    # 兒童醫院 (CH)
+    "02": "一般兒科", "10": "新生兒科", "18": "青少年醫學科",
+    "20": "健兒門診", "24": "小兒外科", "36": "特殊需求者口腔醫學科",
+    # 分院共用
+    "CPC": "臨床心理中心", "CHA": "形體美容中心",
+    # 新竹生醫 (T7) — 尾碼 V
+    "MEDV": "內科部", "PEDV": "小兒部", "FMV": "家庭醫學部",
+    "PMRV": "復健部", "PSYV": "精神部", "NEUV": "神經部",
+    "ONCV": "腫瘤醫學部", "GERV": "老年醫學部",
+    "SURV": "外科部", "ORTV": "骨科部", "OBGV": "婦產部",
+    "ENTV": "耳鼻喉部", "UROV": "泌尿部", "OPHV": "眼科部",
+    "DENV": "牙科部", "DERV": "皮膚部", "KBRV": "乳房醫學中心",
+    # 雲林虎尾 (Y0) — 前綴 H
+    "HMED": "內科部", "HSUR": "外科部", "HFM": "家庭醫學部",
+    "HNEU": "神經部", "HORT": "骨科部", "HURO": "泌尿部",
+    "HOBG": "婦產部", "HPED": "小兒部", "HOPH": "眼科部",
+    "HENT": "耳鼻喉部", "HDER": "皮膚部", "HPMR": "復健部",
+    "HPSY": "精神部", "HDEN": "牙科部", "HONC": "腫瘤醫學部",
+}
+
 NTUH_DEPTS = [
     "MED", "GERO", "FM", "NEUR", "GENE", "PMR", "ONC", "PSYC", "EOM",
     "SURG", "ORTH", "OBGY", "OPH", "ENT", "DENT", "DERM", "URO",
@@ -186,6 +229,7 @@ class NtuhAdapter(BaseHospitalAdapter):
         soup = BeautifulSoup(html, "html.parser")
         date_str = now.strftime("%Y/%m/%d")
         session = TIME_NAMES.get(time_code, "未知")
+        dept_name = DEPT_NAMES.get(dept_code, dept_code)
         results = []
 
         cards = soup.find_all("div", class_="clinic-room-number")
@@ -215,7 +259,7 @@ class NtuhAdapter(BaseHospitalAdapter):
                 hospital_name=self.hospital_name,
                 date=date_str,
                 session=session,
-                department=dept_code,
+                department=dept_name,
                 doctor_name=doctor,
                 clinic_room=clinic_room,
                 current_number=current_number,
