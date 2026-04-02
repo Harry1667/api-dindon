@@ -12,7 +12,7 @@ from app.scrapers.changgung import (
     yunlin_changgung, chiayi_changgung, kaohsiung_changgung, fengshan_changgung,
     tucheng_changgung,
 )
-from app.scrapers.ntuh import ntuh_main, ntuh_children
+from app.scrapers.ntuh import ntuh_main, ntuh_children, ntuh_cancer
 from app.scrapers.mackay import mackay_taipei, mackay_tamsui
 from app.scrapers.tpvgh import TpvghAdapter
 from app.scrapers.cathay import CathayAdapter, cathay_xizhi
@@ -48,7 +48,7 @@ class AdapterRegistry:
 
 
 # ============================================================
-# 註冊所有 Adapter（共 28 家）
+# 註冊所有 Adapter（共 29 家）
 # ============================================================
 
 # --- 台北市 醫學中心 ---
@@ -63,6 +63,7 @@ if settings.enable_wanfang_scraper:
     AdapterRegistry.register(WanfangAdapter())           # 萬芳醫院（需 ENABLE_WANFANG_SCRAPER=true）
 
 # --- 台北市 區域醫院 ---
+AdapterRegistry.register(ntuh_cancer)                  # 台大癌醫
 AdapterRegistry.register(ntuh_children)                # 台大兒童醫院
 AdapterRegistry.register(ChghAdapter())                # 振興醫院
 

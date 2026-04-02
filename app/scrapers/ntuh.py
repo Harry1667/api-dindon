@@ -25,6 +25,16 @@ NTUH_DEPTS = [
     "MED", "GERO", "FM", "NEUR", "GENE", "PMR", "ONC", "PSYC", "EOM",
     "SURG", "ORTH", "OBGY", "OPH", "ENT", "DENT", "DERM", "URO",
 ]
+
+# 台大癌醫科別代碼
+NTUCC_DEPTS = [
+    "ME03", "ME04", "ME12", "ME10", "ME07", "ME02", "ME08", "ME06",
+    "ME09", "ME05", "ME11", "ME15",  # 內科系
+    "ONCR", "HEMA", "RT",  # 腫瘤/血液/放射
+    "SR03", "SR02", "SR07", "SR04", "SR05", "SR08", "SR06",  # 外科系
+    "SU04", "SU06", "SU07", "SU02", "SU08", "SU01", "SU05", "SU09",  # 外科
+    "KBRC",  # 乳房醫學中心
+]
 TIME_CODES = ["1", "2", "3"]
 TIME_NAMES = {"1": "上午診", "2": "下午診", "3": "夜診"}
 
@@ -32,10 +42,11 @@ TIME_NAMES = {"1": "上午診", "2": "下午診", "3": "夜診"}
 class NtuhAdapter(BaseHospitalAdapter):
     """台大醫院 Adapter"""
 
-    def __init__(self, hospital_code: str, hospital_name: str, hosp_code: str):
+    def __init__(self, hospital_code: str, hospital_name: str, hosp_code: str, depts: list[str] | None = None):
         self.hospital_code = hospital_code
         self.hospital_name = hospital_name
         self.hosp_code = hosp_code
+        self.depts = depts or NTUH_DEPTS
         self.base_url = "https://reg.ntuh.gov.tw/WebReg/WebReg/DeptLightTable"
 
     async def fetch_all_progress(self) -> list[ClinicProgressData]:
@@ -61,7 +72,7 @@ class NtuhAdapter(BaseHospitalAdapter):
                 pass
 
             for time_code in active_times:
-                for dept in NTUH_DEPTS:
+                for dept in self.depts:
                     try:
                         results = await self._fetch_dept(
                             client, dept, time_code, now
@@ -178,9 +189,10 @@ class NtuhAdapter(BaseHospitalAdapter):
         return results
 
     async def get_departments(self) -> list[str]:
-        return [d for d in NTUH_DEPTS]
+        return [d for d in self.depts]
 
 
 # === 預建院區 ===
 ntuh_main = NtuhAdapter("ntuh", "台大醫院", "T0")
 ntuh_children = NtuhAdapter("ntuh-children", "台大兒童醫院", "CH")
+ntuh_cancer = NtuhAdapter("ntuh-cancer", "台大癌醫", "C0", depts=NTUCC_DEPTS)

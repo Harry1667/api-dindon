@@ -825,6 +825,10 @@ def _build_alias_map():
         "萬芳醫院":     ("wanfang", "萬芳醫院"),
         "萬芳":         ("wanfang", "萬芳醫院"),
         # === 台北市 區域醫院 ===
+        "台大癌醫中心": ("ntuh-cancer", "台大癌醫"),
+        "台大癌醫":     ("ntuh-cancer", "台大癌醫"),
+        "臺大癌醫":     ("ntuh-cancer", "台大癌醫"),
+        "癌醫":         ("ntuh-cancer", "台大癌醫"),
         "台大兒童醫院": ("ntuh-children", "台大兒童醫院"),
         "台大兒童":     ("ntuh-children", "台大兒童醫院"),
         "臺大兒童":     ("ntuh-children", "台大兒童醫院"),
@@ -1399,7 +1403,7 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
         return (
             "🏥 目前支援查詢的醫院：\n\n"
             "【台北市】\n"
-            "• 台大醫院、台大兒童醫院\n"
+            "• 台大醫院、台大兒童醫院、台大癌醫\n"
             "• 三軍總醫院（三總）\n"
             "• 台北榮總\n"
             "• 台北長庚\n"
