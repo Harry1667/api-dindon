@@ -203,48 +203,41 @@ class NotifierService:
             await self._send_and_finish(task, line_user_id, message, "arrived")
             return
 
-        # ========== 一般提醒 ==========
+        # ========== 1-push 提醒（差 N 號時通知）==========
 
-        should_notify = self._should_notify(mode, remaining, last_remaining)
+        threshold = task.threshold or 3
+        should_notify = self._should_notify(threshold, remaining, last_remaining)
 
         if not should_notify:
+            # 首次檢查時靜默記錄 remaining，供後續比較用（不推播）
+            if last_remaining is None:
+                try:
+                    await self.tracker.update_last_remaining(task.id, remaining)
+                except Exception as e:
+                    logger.error(f"[notifier] 靜默更新失敗 task={task.id}: {e}")
             return
 
-        icon = MODE_LABELS.get(mode, "🔔")
         message = (
-            f"{icon} 看診進度更新\n"
+            f"🔔 差 {remaining} 號了，該出發！\n\n"
             f"{header}\n"
-            f"目前看到第 {current} 號，您是第 {user_num} 號\n"
-            f"還有約 {remaining} 位"
+            f"目前看到第 {current} 號，您是第 {user_num} 號\n\n"
+            f"💡 輸入 t 查看最新進度"
         )
 
         await self._send(task, line_user_id, message, remaining)
 
-    def _should_notify(self, mode: str, remaining: int, last_remaining: int | None) -> bool:
-        if mode == NotifyMode.NORMAL.value:
-            if last_remaining is None:
-                return True  # 首次一定通知（讓用戶知道系統在追蹤）
-            return remaining != last_remaining
+    def _should_notify(self, threshold: int, remaining: int, last_remaining: int | None) -> bool:
+        """1-push 模式：只在 remaining 首次 <= threshold 時通知一次
 
-        elif mode == NotifyMode.LIGHT.value:
-            if last_remaining is None:
-                return True  # 首次一定通知
-            for point in LIGHT_NOTIFY_POINTS:
-                if remaining <= point:
-                    if last_remaining > point:
-                        return True
-                    break
-            return False
-
-        elif mode == NotifyMode.FINAL.value:
-            if last_remaining is None:
-                return True  # 首次一定通知
-            if remaining > 3:
-                return False
-            if last_remaining > 3:
-                return True
-            return remaining != last_remaining and remaining <= 1
-
+        首次檢查（last_remaining=None）時：
+        - 如果 remaining 已經 <= threshold，直接通知（用戶建立追蹤時可能已經快到號了）
+        - 否則不通知，靜默記錄 remaining 供後續比較
+        """
+        if last_remaining is None:
+            # 首次：如果已經在門檻內就通知
+            return remaining <= threshold
+        if remaining <= threshold and last_remaining > threshold:
+            return True
         return False
 
     async def _send(self, task, line_user_id: str, message: str, remaining: int):

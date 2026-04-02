@@ -1,66 +1,73 @@
-"""通知服務測試 — 核心邏輯驗證"""
+"""通知服務測試 — 1-push 模式核心邏輯驗證"""
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 
 from app.services.notifier import NotifierService
-from app.models.tracking_task import NotifyMode
 
 
 class TestShouldNotify:
-    """測試通知觸發條件"""
+    """測試 1-push 通知觸發條件（threshold-based）"""
 
     def setup_method(self):
         self.svc = NotifierService.__new__(NotifierService)
 
-    def test_normal_mode_first_notify_within_10(self):
-        """NORMAL 模式：首次通知，剩 10 號內"""
-        assert self.svc._should_notify("normal", remaining=5, last_remaining=None) is True
+    # ========== 首次檢查（last_remaining=None）==========
 
-    def test_normal_mode_first_notify_beyond_10(self):
-        """NORMAL 模式：首次通知，超過 10 號也通知（讓用戶知道系統在追蹤）"""
-        assert self.svc._should_notify("normal", remaining=35, last_remaining=None) is True
+    def test_first_check_within_threshold_triggers(self):
+        """首次檢查，已在門檻內（如差 2 號，門檻 3）→ 立即通知"""
+        assert self.svc._should_notify(threshold=3, remaining=2, last_remaining=None) is True
 
-    def test_normal_mode_number_changed(self):
-        """NORMAL 模式：號碼變動"""
-        assert self.svc._should_notify("normal", remaining=3, last_remaining=4) is True
+    def test_first_check_at_threshold_triggers(self):
+        """首次檢查，剛好在門檻上（差 3 號，門檻 3）→ 通知"""
+        assert self.svc._should_notify(threshold=3, remaining=3, last_remaining=None) is True
 
-    def test_normal_mode_number_same(self):
-        """NORMAL 模式：號碼沒變"""
-        assert self.svc._should_notify("normal", remaining=3, last_remaining=3) is False
+    def test_first_check_beyond_threshold_no_trigger(self):
+        """首次檢查，還沒到門檻（差 10 號，門檻 3）→ 不通知"""
+        assert self.svc._should_notify(threshold=3, remaining=10, last_remaining=None) is False
 
-    def test_light_mode_first_always_triggers(self):
-        """LIGHT 模式：首次一定觸發"""
-        assert self.svc._should_notify("light", remaining=50, last_remaining=None) is True
+    # ========== 門檻穿越（正常情境）==========
 
-    def test_light_mode_triggers_at_10(self):
-        """LIGHT 模式：剩 10 號時觸發"""
-        assert self.svc._should_notify("light", remaining=10, last_remaining=50) is True
+    def test_crosses_threshold_triggers(self):
+        """從門檻外穿越到門檻內 → 通知"""
+        assert self.svc._should_notify(threshold=5, remaining=4, last_remaining=6) is True
 
-    def test_light_mode_triggers_at_5(self):
-        """LIGHT 模式：剩 5 號時觸發（上次通知是在 > 10 號時）"""
-        assert self.svc._should_notify("light", remaining=5, last_remaining=11) is True
+    def test_at_threshold_from_above_triggers(self):
+        """從門檻外到達門檻值 → 通知"""
+        assert self.svc._should_notify(threshold=5, remaining=5, last_remaining=6) is True
 
-    def test_light_mode_no_retrigger_at_5_after_10(self):
-        """LIGHT 模式：已在 10 號通知過，剩 5 號時不重複觸發 10 號通知"""
-        assert self.svc._should_notify("light", remaining=5, last_remaining=10) is False
+    def test_already_below_threshold_no_retrigger(self):
+        """已經在門檻內，號碼繼續下降 → 不重複通知"""
+        assert self.svc._should_notify(threshold=5, remaining=3, last_remaining=4) is False
 
-    def test_light_mode_no_trigger_at_7(self):
-        """LIGHT 模式：剩 7 號時不觸發"""
-        assert self.svc._should_notify("light", remaining=7, last_remaining=10) is False
+    def test_still_above_threshold_no_trigger(self):
+        """還在門檻外 → 不通知"""
+        assert self.svc._should_notify(threshold=5, remaining=8, last_remaining=10) is False
 
-    def test_final_mode_first_always_triggers(self):
-        """FINAL 模式：首次一定觸發"""
-        assert self.svc._should_notify("final", remaining=50, last_remaining=None) is True
+    # ========== 邊界情況 ==========
 
-    def test_final_mode_triggers_at_3(self):
-        """FINAL 模式：剩 3 號時觸發"""
-        assert self.svc._should_notify("final", remaining=3, last_remaining=50) is True
+    def test_threshold_1_triggers_at_1(self):
+        """門檻 1：差 1 號時通知"""
+        assert self.svc._should_notify(threshold=1, remaining=1, last_remaining=2) is True
 
-    def test_final_mode_no_trigger_at_5_after_first(self):
-        """FINAL 模式：首次通知後，剩 5 號不觸發"""
-        assert self.svc._should_notify("final", remaining=5, last_remaining=35) is False
+    def test_threshold_1_no_trigger_at_2(self):
+        """門檻 1：差 2 號時不通知"""
+        assert self.svc._should_notify(threshold=1, remaining=2, last_remaining=3) is False
+
+    def test_large_threshold_triggers(self):
+        """大門檻（30）：差 30 號時通知"""
+        assert self.svc._should_notify(threshold=30, remaining=29, last_remaining=31) is True
+
+    def test_remaining_zero_after_threshold_no_retrigger(self):
+        """到號了（remaining=0）但已經通知過 → 不重複"""
+        assert self.svc._should_notify(threshold=3, remaining=0, last_remaining=2) is False
+
+    # ========== 號碼跳過門檻 ==========
+
+    def test_skip_past_threshold_triggers(self):
+        """號碼跳過門檻（如 7→1，門檻 5）→ 通知"""
+        assert self.svc._should_notify(threshold=5, remaining=1, last_remaining=7) is True
 
 
 class TestNotifyAtomicity:

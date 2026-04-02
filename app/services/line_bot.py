@@ -252,9 +252,9 @@ class LineBotService:
 
     async def _handle_track_with_mode(
         self, user_id: str, hospital: str, dept: str, doctor: str,
-        user_number: int, notify_mode: str
+        user_number: int, notify_mode: str, threshold: int = 3
     ) -> str:
-        """建立追蹤（含模式選擇），由 webhook 追蹤流程呼叫"""
+        """建立追蹤（含門檻設定），由 webhook 追蹤流程呼叫"""
         # 找 hospital_code
         hospital_code = None
         for alias, code in HOSPITAL_ALIASES.items():
@@ -274,8 +274,7 @@ class LineBotService:
         adapter = AdapterRegistry.get(hospital_code)
         hospital_name = adapter.hospital_name if adapter else hospital
 
-        mode_labels = {"normal": "📢 每號提醒", "light": "🔔 輕量提醒", "final": "🔕 最後提醒"}
-        mode_label = mode_labels.get(notify_mode, "🔔 輕量提醒")
+        threshold_label = f"🔔 差 {threshold} 號時通知你"
 
         # 過號檢查
         if results:
@@ -298,6 +297,7 @@ class LineBotService:
             clinic_room=results[0].clinic_room if results else None,
             user_number=user_number,
             notify_mode=notify_mode,
+            threshold=threshold,
         )
 
         if results:
@@ -315,7 +315,7 @@ class LineBotService:
                 f"🏥 {hospital_name} {p.department} {p.doctor_name} {p.clinic_room}\n"
                 f"🎫 你是第 {user_number} 號，目前第 {p.current_number} 號\n"
                 f"{est_text}\n\n"
-                f"{mode_label}\n\n"
+                f"{threshold_label}\n\n"
                 f"💡 可以安心離開候診區\n"
                 f"💡 輸入 t 隨時查看進度"
             )
@@ -324,7 +324,7 @@ class LineBotService:
                 f"✅ 追蹤成功！\n\n"
                 f"🏥 {hospital_name} {dept} {doctor}\n"
                 f"🎫 你是第 {user_number} 號\n"
-                f"{mode_label}\n\n"
+                f"{threshold_label}\n\n"
                 f"目前暫無即時資料，有進度時會通知您\n"
                 f"💡 輸入 t 隨時查看進度"
             )

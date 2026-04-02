@@ -1218,21 +1218,26 @@ async def _handle_pretrack_in_chat(msg: str, user_id: str, conv: dict) -> str:
         if not numbers:
             return "請輸入數字號碼"
         conv["pretrack_number"] = int(numbers[0])
-        conv["state"] = "pretrack_mode"
+        conv["state"] = "pretrack_threshold"
         return (
             f"您是第 {conv['pretrack_number']} 號\n\n"
-            f"請選擇提醒模式：\n\n"
-            f"  1. 📢 每號提醒\n"
-            f"  2. 🔔 輕量提醒（推薦）\n"
-            f"  3. 🔕 最後提醒"
+            f"差幾號時提醒你？\n"
+            f"（輸入數字，例如 3 = 差 3 號時通知）\n\n"
+            f"💡 住附近可設 3，從家出發建議設 10\n"
+            f"直接輸入 ok 使用預設值 3"
         )
 
-    # Step 6: 選模式 → 建立追蹤
-    if state == "pretrack_mode":
-        mode_map = {"1": "normal", "2": "light", "3": "final"}
-        mode = mode_map.get(msg.strip(), None)
-        if not mode:
-            return "請輸入 1、2 或 3"
+    # Step 6: 設定門檻 → 建立追蹤
+    if state == "pretrack_threshold":
+        if msg.strip().lower() in ("ok", "好", "是", "預設", "3"):
+            threshold = 3
+        else:
+            numbers = re.findall(r"\d+", msg)
+            if not numbers:
+                return "請輸入數字（1-30），或輸入 ok 使用預設值 3"
+            threshold = int(numbers[0])
+            if threshold < 1 or threshold > 30:
+                return "範圍 1-30，請重新輸入"
 
         hospital = conv["pretrack_hospital"]
         hospital_code = conv["pretrack_hospital_code"]
@@ -1259,15 +1264,15 @@ async def _handle_pretrack_in_chat(msg: str, user_id: str, conv: dict) -> str:
                 doctor_name=doctor or None,
                 clinic_room=clinic_room,
                 user_number=user_number,
-                notify_mode=mode,
+                notify_mode="light",
                 session_time=session_time or None,
+                threshold=threshold,
             )
         finally:
             await _eng.dispose()
 
         adapter = AdapterRegistry.get(hospital_code)
         hosp_name = adapter.hospital_name if adapter else hospital
-        mode_labels = {"normal": "📢 每號提醒", "light": "🔔 輕量提醒", "final": "🔕 最後提醒"}
 
         detail = f"{dept} — {doctor}" if dept and doctor else (clinic_room or dept or doctor or "")
         session_line = f"⏰ {session_time}\n" if session_time else ""
@@ -1277,8 +1282,9 @@ async def _handle_pretrack_in_chat(msg: str, user_id: str, conv: dict) -> str:
             f"{session_line}"
             f"📌 {detail}\n"
             f"🎫 第 {user_number} 號\n"
-            f"模式：{mode_labels.get(mode, '🔔')}\n\n"
-            f"系統會自動監控，快到號時通知您"
+            f"🔔 差 {threshold} 號時通知你\n\n"
+            f"系統會自動監控，快到號時通知您\n"
+            f"💡 輸入 t 隨時查看進度"
         )
 
     return "操作有誤，請重新輸入\n輸入「取消」返回"
@@ -1854,9 +1860,9 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
                 if kw in extra_filter:
                     quick_session = val
                     break
-            # 進入追蹤流程：問號碼已有，直接問模式
+            # 進入追蹤流程：問號碼已有，直接問門檻
             _conversations[user_id] = {
-                "state": "pretrack_mode",
+                "state": "pretrack_threshold",
                 "pretrack_hospital": hospital_label,
                 "pretrack_hospital_code": hospital_code,
                 "pretrack_session": quick_session or "",
@@ -1871,10 +1877,10 @@ async def handle_message(msg: str, user_id: str = DEMO_USER_ID) -> str:
                 f"🏥 {hospital_label} {clinic_room}\n"
                 f"{session_hint}"
                 f"🎫 第 {user_number} 號\n\n"
-                f"請選擇提醒模式：\n\n"
-                f"  1. 📢 每號提醒\n"
-                f"  2. 🔔 輕量提醒（推薦）\n"
-                f"  3. 🔕 最後提醒"
+                f"差幾號時提醒你？\n"
+                f"（輸入數字，例如 3 = 差 3 號時通知）\n\n"
+                f"💡 住附近可設 3，從家出發建議設 10\n"
+                f"直接輸入 ok 使用預設值 3"
             )
 
     # 抓取看診資料

@@ -175,7 +175,7 @@ async def _handle_track_flow(user_id: str, text: str, reply_token: str) -> bool:
     conv = _conversations.get(user_id, {})
     state = conv.get("state", "")
 
-    if state not in ("waiting_track_number", "waiting_track_mode"):
+    if state not in ("waiting_track_number", "waiting_track_threshold"):
         return False
 
     # 取消
@@ -198,32 +198,31 @@ async def _handle_track_flow(user_id: str, text: str, reply_token: str) -> bool:
             return True
 
         conv["track_number"] = num
-        conv["state"] = "waiting_track_mode"
+        conv["state"] = "waiting_track_threshold"
         await line_bot_service.reply(reply_token, (
             f"您是第 {conv['track_number']} 號\n\n"
-            f"請選擇提醒模式：\n\n"
-            f"1. 📢 每號提醒\n"
-            f"   每次叫號都通知（適合快到號時）\n\n"
-            f"2. 🔔 輕量提醒（推薦）\n"
-            f"   剩 10、5、3、1 號時通知\n"
-            f"   不會一直跳通知打擾你\n\n"
-            f"3. 🔕 最後提醒\n"
-            f"   剩 3 號內才通知\n"
-            f"   適合不想被打擾的人"
+            f"差幾號時提醒你？\n"
+            f"（輸入數字，例如 3 = 差 3 號時通知）\n\n"
+            f"💡 住附近可設 3，從家出發建議設 10\n"
+            f"直接輸入 ok 使用預設值 3"
         ))
         return True
 
-    # Step 2: 等待模式選擇
-    if state == "waiting_track_mode":
-        mode_map = {
-            "1": "normal", "每號": "normal", "每號提醒": "normal",
-            "2": "light", "輕量": "light", "輕量提醒": "light",
-            "3": "final", "最後": "final", "最後提醒": "final",
-        }
-        mode = mode_map.get(text.strip(), None)
-        if not mode:
-            await line_bot_service.reply(reply_token, "請輸入 1、2 或 3 選擇模式")
-            return True
+    # Step 2: 等待門檻設定
+    if state == "waiting_track_threshold":
+        import re
+        # 預設 3，ok/好/是 都用預設
+        if text.strip().lower() in ("ok", "好", "是", "預設", "3"):
+            threshold = 3
+        else:
+            numbers = re.findall(r"\d+", text)
+            if not numbers:
+                await line_bot_service.reply(reply_token, "請輸入數字（1-30），或輸入 ok 使用預設值 3")
+                return True
+            threshold = int(numbers[0])
+            if threshold < 1 or threshold > 30:
+                await line_bot_service.reply(reply_token, "範圍 1-30，請重新輸入")
+                return True
 
         hospital = conv["track_hospital"]
         dept = conv["track_dept"]
@@ -231,9 +230,9 @@ async def _handle_track_flow(user_id: str, text: str, reply_token: str) -> bool:
         user_number = conv["track_number"]
         reset_conv(user_id)
 
-        # 建立追蹤
+        # 建立追蹤（mode 固定為 light，threshold 用用戶輸入的值）
         reply = await line_bot_service._handle_track_with_mode(
-            user_id, hospital, dept, doctor, user_number, mode
+            user_id, hospital, dept, doctor, user_number, "light", threshold=threshold
         )
         await line_bot_service.reply(reply_token, reply)
         return True
@@ -293,26 +292,30 @@ async def _handle_pretrack_flow(user_id: str, text: str, reply_token: str) -> bo
             await line_bot_service.reply(reply_token, "請輸入數字號碼")
             return True
         conv["pretrack_number"] = int(numbers[0])
-        conv["state"] = "pretrack_mode"
+        conv["state"] = "pretrack_threshold"
         await line_bot_service.reply(reply_token, (
             f"您是第 {conv['pretrack_number']} 號\n\n"
-            f"請選擇提醒模式：\n\n"
-            f"1. 📢 每號提醒\n"
-            f"   每次叫號都通知\n\n"
-            f"2. 🔔 輕量提醒（推薦）\n"
-            f"   剩 10、5、3、1 號時通知\n\n"
-            f"3. 🔕 最後提醒\n"
-            f"   剩 3 號內才通知"
+            f"差幾號時提醒你？\n"
+            f"（輸入數字，例如 3 = 差 3 號時通知）\n\n"
+            f"💡 住附近可設 3，從家出發建議設 10\n"
+            f"直接輸入 ok 使用預設值 3"
         ))
         return True
 
-    # Step 5: 選模式 → 建立
-    if state == "pretrack_mode":
-        mode_map = {"1": "normal", "2": "light", "3": "final"}
-        mode = mode_map.get(text.strip(), None)
-        if not mode:
-            await line_bot_service.reply(reply_token, "請輸入 1、2 或 3")
-            return True
+    # Step 5: 設定門檻 → 建立
+    if state == "pretrack_threshold":
+        import re
+        if text.strip().lower() in ("ok", "好", "是", "預設", "3"):
+            threshold = 3
+        else:
+            numbers = re.findall(r"\d+", text)
+            if not numbers:
+                await line_bot_service.reply(reply_token, "請輸入數字（1-30），或輸入 ok 使用預設值 3")
+                return True
+            threshold = int(numbers[0])
+            if threshold < 1 or threshold > 30:
+                await line_bot_service.reply(reply_token, "範圍 1-30，請重新輸入")
+                return True
 
         hospital = conv["pretrack_hospital"]
         hospital_code = conv["pretrack_hospital_code"]
@@ -332,13 +335,13 @@ async def _handle_pretrack_flow(user_id: str, text: str, reply_token: str) -> bo
             doctor_name=doctor,
             clinic_room=None,
             user_number=user_number,
-            notify_mode=mode,
+            notify_mode="light",
             session_time=session_time,
+            threshold=threshold,
         )
 
         adapter = AdapterRegistry.get(hospital_code)
         hosp_name = adapter.hospital_name if adapter else hospital
-        mode_labels = {"normal": "📢 每號提醒", "light": "🔔 輕量提醒", "final": "🔕 最後提醒"}
 
         await line_bot_service.reply(reply_token, (
             f"✅ 預約追蹤成功！\n\n"
@@ -346,8 +349,9 @@ async def _handle_pretrack_flow(user_id: str, text: str, reply_token: str) -> bo
             f"⏰ {session_time}\n"
             f"📌 {dept} — {doctor}\n"
             f"🎫 第 {user_number} 號\n"
-            f"模式：{mode_labels.get(mode, '🔔')}\n\n"
-            f"看診開始後系統會自動監控，快到號時通知您"
+            f"🔔 差 {threshold} 號時通知你\n\n"
+            f"看診開始後系統會自動監控，快到號時通知您\n"
+            f"💡 輸入 t 隨時查看進度"
         ))
         return True
 
