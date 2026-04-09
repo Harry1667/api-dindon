@@ -1,4 +1,8 @@
-"""測試基礎設定"""
+"""測試基礎設定
+
+測試需在 Docker 內執行（Python 3.12 + 所有依賴）：
+  docker compose exec app python -m pytest tests/ -v
+"""
 
 import pytest
 
@@ -9,9 +13,13 @@ def mock_cache():
     from unittest.mock import AsyncMock, MagicMock
     cache = MagicMock()
     cache.search_progress = AsyncMock(return_value=[])
+    cache.get_all_progress = AsyncMock(return_value=[])
     cache.store_progress = AsyncMock()
     cache.is_healthy = AsyncMock(return_value=True)
     cache.close = AsyncMock()
+    cache.redis = MagicMock()
+    cache.redis.incr = AsyncMock(return_value=1)
+    cache.redis.expire = AsyncMock()
     return cache
 
 

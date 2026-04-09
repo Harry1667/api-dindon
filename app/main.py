@@ -3,7 +3,8 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Request
+from app.middleware.auth import verify_api_token, check_rate_limit
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -83,9 +84,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ DB 預熱失敗（不影響功能）: {e}")
 
+    # 建立共用 CacheService（所有 API route 透過 request.app.state.cache 取用）
+    from app.services.cache import CacheService
+    app.state.cache = CacheService()
+    logger.info("✅ CacheService 共用實例已建立")
+
     yield
 
     # 關閉連線
+    await app.state.cache.close()
     await engine.dispose()
     logger.info("👋 系統已關閉")
 
@@ -98,6 +105,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# 全域例外處理 — 未捕獲的 500 錯誤轉統一 JSON 格式
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"未捕獲的例外: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"error": {"code": "INTERNAL_ERROR", "message": "伺服器內部錯誤"}},
+    )
+
 # 註冊路由
 app.include_router(webhook_router)
 app.include_router(admin_router)
@@ -106,19 +124,16 @@ app.include_router(live_test_router)
 
 
 @app.get("/health")
-async def health_check():
+async def health_check(request: Request):
     """健康檢查 — 含 Redis 和 DB 連線狀態"""
-    from app.services.cache import CacheService
     from app.models.database import async_session
     from sqlalchemy import text
 
     checks = {"redis": False, "database": False}
 
-    # Redis 檢查
+    # Redis 檢查（用共用 CacheService）
     try:
-        cache = CacheService()
-        checks["redis"] = await cache.is_healthy()
-        await cache.close()
+        checks["redis"] = await request.app.state.cache.is_healthy()
     except Exception:
         pass
 
@@ -138,7 +153,7 @@ async def health_check():
     }
 
 
-@app.get("/api/hospitals")
+@app.get("/api/hospitals", dependencies=[Depends(verify_api_token), Depends(check_rate_limit)])
 async def list_hospitals():
     """列出所有已註冊醫院及其 Adapter 狀態"""
     from app.scrapers.registry import AdapterRegistry
@@ -157,9 +172,27 @@ async def list_hospitals():
     }
 
 
-@app.get("/api/progress/{hospital_code}")
+@app.get("/api/progress/{hospital_code}", dependencies=[Depends(verify_api_token), Depends(check_rate_limit)])
+async def get_progress(request: Request, hospital_code: str):
+    """查詢某醫院看診進度（讀 Redis 快取，資料延遲 ≤ 60 秒）"""
+    from app.scrapers.registry import AdapterRegistry
+    adapter = AdapterRegistry.get(hospital_code)
+    if not adapter:
+        return {"error": f"找不到醫院: {hospital_code}", "available": AdapterRegistry.get_all_codes()}
+
+    cache = request.app.state.cache
+    progress_list = await cache.get_all_progress(hospital_code)
+    return {
+        "hospital": adapter.hospital_name,
+        "code": hospital_code,
+        "count": len(progress_list),
+        "data": [p.to_dict() for p in progress_list],
+    }
+
+
+@app.get("/api/admin/live-progress/{hospital_code}")
 async def get_live_progress(hospital_code: str):
-    """即時查詢某醫院看診進度（直接呼叫 Adapter，不經快取）"""
+    """即時查詢某醫院看診進度（直接呼叫 Adapter，僅 admin 使用）"""
     from app.scrapers.registry import AdapterRegistry
     adapter = AdapterRegistry.get(hospital_code)
     if not adapter:
@@ -182,7 +215,7 @@ async def trigger_sync_master_data():
     return {"task_id": task.id, "status": "queued"}
 
 
-@app.get("/api/departments/{hospital_code}")
+@app.get("/api/departments/{hospital_code}", dependencies=[Depends(verify_api_token), Depends(check_rate_limit)])
 async def list_departments(hospital_code: str):
     """查詢某醫院的所有診科"""
     from sqlalchemy import select
@@ -203,7 +236,7 @@ async def list_departments(hospital_code: str):
         }
 
 
-@app.get("/api/doctors/{hospital_code}")
+@app.get("/api/doctors/{hospital_code}", dependencies=[Depends(verify_api_token), Depends(check_rate_limit)])
 async def list_doctors(hospital_code: str, department: str | None = None):
     """查詢某醫院的所有醫生（可依科別篩選）"""
     from sqlalchemy import select
@@ -249,7 +282,7 @@ async def nhi_stats():
     return {"stats": stats}
 
 
-@app.get("/api/search/hospital")
+@app.get("/api/search/hospital", dependencies=[Depends(verify_api_token), Depends(check_rate_limit)])
 async def search_hospital(q: str, limit: int = 10):
     """搜尋醫院"""
     from app.services.nhi_sync import NhiQueryService
@@ -270,7 +303,7 @@ async def search_hospital(q: str, limit: int = 10):
     }
 
 
-@app.get("/api/search/hospitals-by-area")
+@app.get("/api/search/hospitals-by-area", dependencies=[Depends(verify_api_token), Depends(check_rate_limit)])
 async def search_hospitals_by_area(area: str, limit: int = 50):
     """依地區搜尋醫院（醫學中心＋區域醫院）"""
     from app.services.nhi_sync import NhiQueryService
@@ -292,7 +325,7 @@ async def search_hospitals_by_area(area: str, limit: int = 50):
     }
 
 
-@app.get("/api/guide/which-department")
+@app.get("/api/guide/which-department", dependencies=[Depends(verify_api_token), Depends(check_rate_limit)])
 async def which_department(q: str, limit: int = 10):
     """查詢症狀/疾病對應的科別（供 LINE Bot 使用）"""
     from sqlalchemy import select, or_
@@ -331,7 +364,7 @@ async def which_department(q: str, limit: int = 10):
     }
 
 
-@app.get("/api/search/pharmacy")
+@app.get("/api/search/pharmacy", dependencies=[Depends(verify_api_token), Depends(check_rate_limit)])
 async def search_pharmacy(area: str, limit: int = 5):
     """搜尋附近藥局"""
     from app.services.nhi_sync import NhiQueryService

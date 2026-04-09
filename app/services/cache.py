@@ -6,6 +6,8 @@
   - 連線超時 5 秒，避免永遠卡住
 """
 
+from __future__ import annotations
+
 import json
 import logging
 
@@ -64,7 +66,7 @@ class CacheService:
             logger.error(f"[cache] 儲存失敗 {hospital_code}: {e}")
 
     async def get_all_progress(self, hospital_code: str) -> list[ClinicProgressData]:
-        """取得某醫院所有診間的即時進度"""
+        """取得某醫院所有診間的即時進度（用 mget 批量取，2 次 round trip）"""
         try:
             index_key = f"index:{hospital_code}"
             room_keys = await self.redis.smembers(index_key)
@@ -72,25 +74,28 @@ class CacheService:
             if not room_keys:
                 return []
 
+            # 用 mget 一次取完，避免逐一 GET 的 N+1 round trip
+            values = await self.redis.mget(*room_keys)
+
             results = []
-            for key in room_keys:
-                data = await self.redis.get(key)
-                if data:
-                    d = json.loads(data)
-                    results.append(ClinicProgressData(
-                        hospital_code=d["hospital_code"],
-                        hospital_name=d["hospital_name"],
-                        date=d["date"],
-                        session=d["session"],
-                        department=d["department"],
-                        doctor_name=d["doctor_name"],
-                        clinic_room=d["clinic_room"],
-                        current_number=d["current_number"],
-                        next_number=d["next_number"],
-                        is_current_skipped=d["is_current_skipped"],
-                        is_next_skipped=d["is_next_skipped"],
-                        fetched_at=__import__("datetime").datetime.fromisoformat(d["fetched_at"]),
-                    ))
+            for data in values:
+                if not data:  # key 已過期（TTL 不同步），跳過
+                    continue
+                d = json.loads(data)
+                results.append(ClinicProgressData(
+                    hospital_code=d["hospital_code"],
+                    hospital_name=d["hospital_name"],
+                    date=d["date"],
+                    session=d["session"],
+                    department=d["department"],
+                    doctor_name=d["doctor_name"],
+                    clinic_room=d["clinic_room"],
+                    current_number=d["current_number"],
+                    next_number=d["next_number"],
+                    is_current_skipped=d["is_current_skipped"],
+                    is_next_skipped=d["is_next_skipped"],
+                    fetched_at=__import__("datetime").datetime.fromisoformat(d["fetched_at"]),
+                ))
 
             return results
         except RedisError as e:
