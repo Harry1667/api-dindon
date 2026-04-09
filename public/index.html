@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>叮咚到號 — 醫院看診進度查詢</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+    --green: #06C755;
+    --bg: #7494C0;
+    --bubble-bot: #FFFFFF;
+    --bubble-user: #06C755;
+    --text: #333;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    background: #E8ECF0;
+    height: 100dvh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.phone-frame {
+    width: 100%;
+    max-width: 420px;
+    height: 100dvh;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+@media (min-width: 500px) {
+    .phone-frame {
+        height: 780px;
+        border-radius: 32px;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+        border: 8px solid #2C2C2C;
+    }
+}
+
+/* Header */
+.chat-header {
+    background: var(--green);
+    color: white;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+}
+.chat-header .avatar {
+    width: 42px; height: 42px;
+    border-radius: 50%;
+    background: white;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; flex-shrink: 0;
+}
+.chat-header .info h3 { font-size: 16px; font-weight: 600; }
+.chat-header .info span { font-size: 11px; opacity: 0.85; }
+
+/* Chat Body */
+.chat-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    -webkit-overflow-scrolling: touch;
+}
+
+.msg-row {
+    display: flex; gap: 8px; max-width: 88%;
+    animation: msgIn 0.25s ease-out;
+}
+@keyframes msgIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.msg-row.bot  { align-self: flex-start; }
+.msg-row.user { align-self: flex-end; flex-direction: row-reverse; }
+
+.msg-row .bubble-avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: white; display: flex; align-items: center; justify-content: center;
+    font-size: 16px; flex-shrink: 0; margin-top: 2px;
+}
+.msg-row.user .bubble-avatar { display: none; }
+
+.bubble {
+    padding: 10px 14px;
+    border-radius: 18px;
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.msg-row.bot .bubble  { background: var(--bubble-bot); color: var(--text); border-top-left-radius: 4px; }
+.msg-row.user .bubble { background: var(--bubble-user); color: white; border-top-right-radius: 4px; }
+
+.time-label {
+    text-align: center;
+    font-size: 11px;
+    color: rgba(255,255,255,0.7);
+    margin: 8px 0;
+}
+
+/* Quick Actions */
+.quick-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding: 4px 0;
+    align-self: flex-start;
+    max-width: 100%;
+}
+.quick-btn {
+    background: white;
+    border: 1.5px solid var(--green);
+    color: var(--green);
+    padding: 6px 12px;
+    border-radius: 16px;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s;
+}
+.quick-btn:hover, .quick-btn:active {
+    background: var(--green);
+    color: white;
+}
+
+/* Typing indicator */
+.typing .bubble::after {
+    content: '⋯';
+    animation: dots 1s infinite;
+}
+@keyframes dots {
+    0%, 20% { content: '⋯'; }
+    40% { content: '⋯⋯'; }
+    60% { content: '⋯⋯⋯'; }
+}
+
+/* Input */
+.chat-input {
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px;
+    background: #F7F8FA;
+    flex-shrink: 0;
+    border-top: 1px solid #E0E0E0;
+}
+.chat-input input {
+    flex: 1;
+    border: 1px solid #DDD;
+    border-radius: 20px;
+    padding: 10px 16px;
+    font-size: 15px;
+    outline: none;
+    background: white;
+}
+.chat-input input:focus { border-color: var(--green); }
+.chat-input button {
+    background: var(--green);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 40px; height: 40px;
+    font-size: 18px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    transition: transform 0.1s;
+}
+.chat-input button:active { transform: scale(0.92); }
+</style>
+</head>
+<body>
+
+<div class="phone-frame">
+    <div class="chat-header">
+        <div class="avatar">🏥</div>
+        <div class="info">
+            <h3>叮咚到號</h3>
+            <span>即時看診進度查詢</span>
+        </div>
+    </div>
+
+    <div class="chat-body" id="chatBody"></div>
+
+    <div class="chat-input">
+        <input type="text" id="msgInput" placeholder="輸入醫院名稱查詢..." autocomplete="off">
+        <button id="sendBtn" onclick="sendMessage()">▶</button>
+    </div>
+</div>
+
+<script>
+const API_BASE = window.location.origin;
+const chatBody = document.getElementById('chatBody');
+const msgInput = document.getElementById('msgInput');
+
+// 醫院代碼對照（從 /api/hospitals 載入）
+let hospitals = [];
+
+// 初始化
+async function init() {
+    addBotMsg('👋 歡迎使用叮咚到號！\n\n輸入醫院名稱查詢即時看診進度\n例如：台大、長庚、馬偕\n\n💡 輸入「醫院」查看完整列表\n💡 輸入「頭痛」查詢該看哪科');
+
+    try {
+        const resp = await fetch(`${API_BASE}/api/hospitals`);
+        const data = await resp.json();
+        hospitals = data.hospitals || [];
+        showQuickActions(['台大醫院', '台北長庚', '馬偕醫院', '國泰醫院', '醫院列表']);
+    } catch (e) {
+        addBotMsg('⚠️ 無法連線到伺服器，請稍後再試');
+    }
+}
+
+// 發送訊息
+async function sendMessage() {
+    const text = msgInput.value.trim();
+    if (!text) return;
+
+    addUserMsg(text);
+    msgInput.value = '';
+
+    const typingEl = addTyping();
+
+    try {
+        const reply = await processMessage(text);
+        removeTyping(typingEl);
+        addBotMsg(reply.text);
+        if (reply.actions) showQuickActions(reply.actions);
+    } catch (e) {
+        removeTyping(typingEl);
+        addBotMsg('⚠️ 查詢失敗，請稍後再試');
+    }
+}
+
+// 處理訊息邏輯
+async function processMessage(text) {
+    const m = text.trim();
+
+    // 醫院列表
+    if (['醫院', '列表', '有哪些', '支援', '全部'].some(k => m.includes(k))) {
+        return listHospitals();
+    }
+
+    // 症狀查科別
+    if (['痛', '癢', '暈', '咳', '燒', '腫', '血', '喘', '吐', '瀉'].some(k => m.includes(k))) {
+        return await searchDepartmentGuide(m);
+    }
+
+    // 查看診進度
+    const hospital = findHospital(m);
+    if (hospital) {
+        return await fetchProgress(hospital, m);
+    }
+
+    // 搜尋醫院
+    if (m.length >= 2) {
+        const matched = hospitals.filter(h => h.name.includes(m));
+        if (matched.length > 0) {
+            return {
+                text: `🔍 找到 ${matched.length} 間符合的醫院：\n\n${matched.map(h => `• ${h.name}`).join('\n')}\n\n點擊醫院名稱查詢進度`,
+                actions: matched.slice(0, 5).map(h => h.name)
+            };
+        }
+    }
+
+    return {
+        text: '🤔 找不到相關醫院\n\n💡 試試：\n• 輸入醫院名稱（如：台大、長庚）\n• 輸入症狀（如：頭痛、咳嗽）\n• 輸入「醫院」查看完整列表'
+    };
+}
+
+// 找醫院
+function findHospital(text) {
+    // 精確匹配
+    let found = hospitals.find(h => text.includes(h.name));
+    if (found) return found;
+
+    // 簡稱匹配
+    const aliases = {
+        '台大': 'ntuh', '台大醫院': 'ntuh',
+        '台大癌醫': 'ntuh-cancer', '癌醫': 'ntuh-cancer',
+        '台大兒童': 'ntuh-children',
+        '榮總': 'tpvgh', '台北榮總': 'tpvgh', '北榮': 'tpvgh',
+        '三總': 'tsgh', '三軍': 'tsgh',
+        '長庚': 'changgung-linkou', '林口長庚': 'changgung-linkou',
+        '台北長庚': 'changgung-taipei',
+        '高雄長庚': 'changgung-kaohsiung',
+        '國泰': 'cathay', '國泰醫院': 'cathay',
+        '馬偕': 'mackay-taipei', '馬偕醫院': 'mackay-taipei',
+        '新光': 'shinkong', '新光醫院': 'shinkong',
+        '萬芳': 'wanfang', '萬芳醫院': 'wanfang',
+        '亞東': 'femh', '亞東醫院': 'femh',
+        '振興': 'chgh', '振興醫院': 'chgh',
+        '慈濟': 'tzuchi-taipei',
+        '輔大': 'fjuh', '輔大醫院': 'fjuh',
+    };
+
+    for (const [alias, code] of Object.entries(aliases)) {
+        if (text.includes(alias)) {
+            return hospitals.find(h => h.code === code);
+        }
+    }
+    return null;
+}
+
+// 查看診進度
+async function fetchProgress(hospital, originalText) {
+    const resp = await fetch(`${API_BASE}/api/progress/${hospital.code}`);
+    const data = await resp.json();
+
+    if (!data.data || data.data.length === 0) {
+        return {
+            text: `🏥 ${hospital.name}\n\n目前沒有看診中的診間資料\n（可能為非看診時段或夜間）`,
+            actions: ['醫院列表']
+        };
+    }
+
+    // 篩選（如果用戶輸入了科別或醫師名）
+    let results = data.data;
+    const filter = originalText.replace(hospital.name, '').trim();
+    // 移除別名
+    for (const alias of Object.keys(findHospital.aliases || {})) {
+        if (originalText.includes(alias)) {
+            const f = originalText.replace(alias, '').trim();
+            if (f) {
+                const filtered = results.filter(r =>
+                    r.department.includes(f) || r.doctor_name.includes(f)
+                );
+                if (filtered.length > 0) results = filtered;
+            }
+            break;
+        }
+    }
+    if (filter) {
+        const filtered = results.filter(r =>
+            r.department.includes(filter) || r.doctor_name.includes(filter)
+        );
+        if (filtered.length > 0) results = filtered;
+    }
+
+    // 格式化
+    const now = new Date();
+    const ts = `${(now.getMonth()+1).toString().padStart(2,'0')}/${now.getDate().toString().padStart(2,'0')} ${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
+
+    // 按科別分組
+    const byDept = {};
+    for (const r of results) {
+        if (!byDept[r.department]) byDept[r.department] = [];
+        byDept[r.department].push(r);
+    }
+
+    let lines = [`🏥 ${hospital.name} 看診進度`, `⏰ ${ts}　共 ${results.length} 個診間`, ''];
+
+    for (const [dept, items] of Object.entries(byDept).sort()) {
+        lines.push(`📌 ${dept}`);
+        for (const it of items) {
+            let info = `👉 ${it.current_number}號`;
+            if (it.is_current_skipped) info += '(過號)';
+            if (it.next_number && it.next_number !== it.current_number) {
+                info += ` → ${it.next_number}號`;
+            }
+            const room = it.clinic_room ? ` [${it.clinic_room}]` : '';
+            const sess = it.session ? ` ${it.session}` : '';
+            lines.push(`  ${it.doctor_name}${room}${sess} ${info}`);
+        }
+        lines.push('');
+    }
+
+    // 取前幾個科別當快捷鍵
+    const depts = Object.keys(byDept).slice(0, 4);
+    const actions = depts.map(d => `${hospital.name} ${d}`);
+
+    return { text: lines.join('\n'), actions };
+}
+
+// 症狀查科別
+async function searchDepartmentGuide(query) {
+    const resp = await fetch(`${API_BASE}/api/guide/which-department?q=${encodeURIComponent(query)}`);
+    const data = await resp.json();
+
+    if (!data.results || data.results.length === 0) {
+        return { text: `🤔 找不到「${query}」相關的科別建議\n\n建議直接到醫院掛號櫃台詢問` };
+    }
+
+    let lines = [`🔍 「${query}」建議看哪科：\n`];
+    const seen = new Set();
+    for (const r of data.results) {
+        if (seen.has(r.department)) continue;
+        seen.add(r.department);
+        lines.push(`🏷️ ${r.department}（${r.category}）`);
+        lines.push(`   疾病：${r.disease}`);
+        lines.push(`   症狀：${r.symptoms}\n`);
+    }
+
+    return { text: lines.join('\n') };
+}
+
+// 醫院列表
+function listHospitals() {
+    // 按地區分組
+    const groups = {
+        '台北市': [], '新北市': [], '基隆': [], '桃園': [],
+        '台中': [], '雲嘉': [], '高雄': [], '其他': []
+    };
+
+    for (const h of hospitals) {
+        const n = h.name;
+        if (n.includes('台大') || n.includes('三軍') || n.includes('榮總') || n.includes('台北長庚') ||
+            n.includes('國泰醫院') || n.includes('馬偕醫院(台北') || n.includes('新光') ||
+            n.includes('萬芳') || n.includes('振興') || n.includes('台大癌醫') || n.includes('台大兒童'))
+            groups['台北市'].push(n);
+        else if (n.includes('亞東') || n.includes('慈濟') || n.includes('淡水') || n.includes('臺北醫院') ||
+                 n.includes('汐止') || n.includes('土城') || n.includes('新北') || n.includes('輔大'))
+            groups['新北市'].push(n);
+        else if (n.includes('基隆')) groups['基隆'].push(n);
+        else if (n.includes('林口') || n.includes('桃園')) groups['桃園'].push(n);
+        else if (n.includes('豐原')) groups['台中'].push(n);
+        else if (n.includes('雲林') || n.includes('嘉義')) groups['雲嘉'].push(n);
+        else if (n.includes('高雄') || n.includes('鳳山')) groups['高雄'].push(n);
+        else groups['其他'].push(n);
+    }
+
+    let lines = [`🏥 支援查詢的醫院（共 ${hospitals.length} 間）\n`];
+    for (const [area, list] of Object.entries(groups)) {
+        if (list.length === 0) continue;
+        lines.push(`【${area}】`);
+        for (const name of list) lines.push(`  • ${name}`);
+        lines.push('');
+    }
+    lines.push('💡 輸入醫院名稱即可查詢進度');
+
+    return {
+        text: lines.join('\n'),
+        actions: ['台大醫院', '台北長庚', '林口長庚', '國泰醫院', '馬偕醫院']
+    };
+}
+
+// === UI 工具 ===
+
+function addBotMsg(text) {
+    const row = document.createElement('div');
+    row.className = 'msg-row bot';
+    row.innerHTML = `<div class="bubble-avatar">🏥</div><div class="bubble">${escapeHtml(text)}</div>`;
+    chatBody.appendChild(row);
+    scrollDown();
+}
+
+function addUserMsg(text) {
+    const row = document.createElement('div');
+    row.className = 'msg-row user';
+    row.innerHTML = `<div class="bubble">${escapeHtml(text)}</div>`;
+    chatBody.appendChild(row);
+    scrollDown();
+}
+
+function addTyping() {
+    const row = document.createElement('div');
+    row.className = 'msg-row bot typing';
+    row.innerHTML = `<div class="bubble-avatar">🏥</div><div class="bubble">查詢中</div>`;
+    chatBody.appendChild(row);
+    scrollDown();
+    return row;
+}
+
+function removeTyping(el) { if (el && el.parentNode) el.parentNode.removeChild(el); }
+
+function showQuickActions(labels) {
+    const container = document.createElement('div');
+    container.className = 'quick-actions';
+    for (const label of labels) {
+        const btn = document.createElement('button');
+        btn.className = 'quick-btn';
+        btn.textContent = label;
+        btn.onclick = () => {
+            msgInput.value = label;
+            sendMessage();
+        };
+        container.appendChild(btn);
+    }
+    chatBody.appendChild(container);
+    scrollDown();
+}
+
+function scrollDown() {
+    requestAnimationFrame(() => {
+        chatBody.scrollTop = chatBody.scrollHeight;
+    });
+}
+
+function escapeHtml(text) {
+    return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+}
+
+// Enter 送出
+msgInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.isComposing) sendMessage();
+});
+
+// 啟動
+init();
+</script>
+</body>
+</html>

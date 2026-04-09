@@ -178,7 +178,10 @@ async def get_progress(request: Request, hospital_code: str):
     from app.scrapers.registry import AdapterRegistry
     adapter = AdapterRegistry.get(hospital_code)
     if not adapter:
-        return {"error": f"找不到醫院: {hospital_code}", "available": AdapterRegistry.get_all_codes()}
+        return JSONResponse(
+            status_code=404,
+            content={"error": {"code": "NOT_FOUND", "message": f"找不到醫院: {hospital_code}"}, "available": AdapterRegistry.get_all_codes()},
+        )
 
     cache = request.app.state.cache
     progress_list = await cache.get_all_progress(hospital_code)
@@ -196,7 +199,10 @@ async def get_live_progress(hospital_code: str):
     from app.scrapers.registry import AdapterRegistry
     adapter = AdapterRegistry.get(hospital_code)
     if not adapter:
-        return {"error": f"找不到醫院: {hospital_code}", "available": AdapterRegistry.get_all_codes()}
+        return JSONResponse(
+            status_code=404,
+            content={"error": {"code": "NOT_FOUND", "message": f"找不到醫院: {hospital_code}"}, "available": AdapterRegistry.get_all_codes()},
+        )
 
     progress_list = await adapter.fetch_all_progress()
     return {
@@ -382,3 +388,16 @@ async def search_pharmacy(area: str, limit: int = 5):
             for r in results
         ]
     }
+
+
+# === 靜態網頁（對話式查詢介面）===
+import os
+from fastapi.responses import FileResponse
+
+@app.get("/chat")
+async def chat_page():
+    """對話式看診進度查詢頁面"""
+    html_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "public", "index.html")
+    if os.path.exists(html_path):
+        return FileResponse(html_path, media_type="text/html")
+    return JSONResponse(status_code=404, content={"error": "頁面不存在"})
