@@ -23,6 +23,7 @@ from app.scrapers.tzuchi import tzuchi_taipei, tzuchi_xindian
 from app.scrapers.femh import FemhAdapter
 from app.scrapers.tph import tph_adapter, fyh_adapter
 from app.scrapers.fjuh import FjuhAdapter
+from app.scrapers.tcvgh import TcvghAdapter
 
 
 class AdapterRegistry:
@@ -89,6 +90,7 @@ AdapterRegistry.register(linkou_changgung)             # 林口長庚
 AdapterRegistry.register(taoyuan_changgung)            # 桃園長庚
 
 # --- 台中 ---
+AdapterRegistry.register(TcvghAdapter())               # 台中榮總
 AdapterRegistry.register(fyh_adapter)                  # 衛福部豐原醫院
 
 # --- 雲嘉 ---

@@ -31,6 +31,7 @@ import app.models.doctor  # noqa: F401
 import app.models.tracking_feedback  # noqa: F401
 import app.models.analytics  # noqa: F401
 import app.models.liff_user  # noqa: F401
+import app.models.user_favorite  # noqa: F401
 
 # 設定 logging（結構化 JSON 日誌）
 try:

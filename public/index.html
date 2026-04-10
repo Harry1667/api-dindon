@@ -6,14 +6,7 @@
 <title>叮咚到號 — 醫院看診進度查詢</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-
-:root {
-    --green: #06C755;
-    --bg: #7494C0;
-    --bubble-bot: #FFFFFF;
-    --bubble-user: #06C755;
-    --text: #333;
-}
+:root { --green: #06C755; --bg: #7494C0; }
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
@@ -25,158 +18,88 @@ body {
 }
 
 .phone-frame {
-    width: 100%;
-    max-width: 420px;
-    height: 100dvh;
+    width: 100%; max-width: 420px; height: 100dvh;
     background: var(--bg);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
+    display: flex; flex-direction: column; overflow: hidden;
 }
 @media (min-width: 500px) {
     .phone-frame {
-        height: 780px;
-        border-radius: 32px;
+        height: 780px; border-radius: 32px;
         box-shadow: 0 20px 60px rgba(0,0,0,0.25);
         border: 8px solid #2C2C2C;
     }
 }
 
-/* Header */
 .chat-header {
-    background: var(--green);
-    color: white;
-    padding: 14px 16px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-shrink: 0;
+    background: var(--green); color: white;
+    padding: 14px 16px; display: flex; align-items: center; gap: 12px; flex-shrink: 0;
 }
 .chat-header .avatar {
-    width: 42px; height: 42px;
-    border-radius: 50%;
-    background: white;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 22px; flex-shrink: 0;
+    width: 42px; height: 42px; border-radius: 50%; background: white;
+    display: flex; align-items: center; justify-content: center; font-size: 22px;
 }
-.chat-header .info h3 { font-size: 16px; font-weight: 600; }
+.chat-header .info h3 { font-size: 16px; }
 .chat-header .info span { font-size: 11px; opacity: 0.85; }
 
-/* Chat Body */
 .chat-body {
-    flex: 1;
-    overflow-y: auto;
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+    flex: 1; overflow-y: auto; padding: 16px;
+    display: flex; flex-direction: column; gap: 8px;
     -webkit-overflow-scrolling: touch;
 }
 
-.msg-row {
-    display: flex; gap: 8px; max-width: 88%;
-    animation: msgIn 0.25s ease-out;
-}
-@keyframes msgIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to   { opacity: 1; transform: translateY(0); }
-}
-.msg-row.bot  { align-self: flex-start; }
+.msg-row { display: flex; gap: 8px; max-width: 88%; animation: msgIn 0.25s ease-out; }
+.msg-row.bot { align-self: flex-start; }
 .msg-row.user { align-self: flex-end; flex-direction: row-reverse; }
 
-.msg-row .bubble-avatar {
-    width: 32px; height: 32px; border-radius: 50%;
-    background: white; display: flex; align-items: center; justify-content: center;
-    font-size: 16px; flex-shrink: 0; margin-top: 2px;
+.bubble-avatar {
+    width: 32px; height: 32px; border-radius: 50%; background: white;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; flex-shrink: 0;
 }
-.msg-row.user .bubble-avatar { display: none; }
 
 .bubble {
-    padding: 10px 14px;
-    border-radius: 18px;
-    font-size: 14px;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-break: break-word;
+    padding: 10px 14px; border-radius: 16px; font-size: 14px; line-height: 1.6;
+    white-space: pre-wrap; word-break: break-word; position: relative;
 }
-.msg-row.bot .bubble  { background: var(--bubble-bot); color: var(--text); border-top-left-radius: 4px; }
-.msg-row.user .bubble { background: var(--bubble-user); color: white; border-top-right-radius: 4px; }
+.bot .bubble { background: white; color: #333; border-bottom-left-radius: 4px; }
+.user .bubble { background: var(--green); color: white; border-bottom-right-radius: 4px; }
 
-.time-label {
-    text-align: center;
-    font-size: 11px;
-    color: rgba(255,255,255,0.7);
-    margin: 8px 0;
+.copy-btn {
+    display: block; margin-top: 6px; background: none; border: 1px solid #CCC;
+    border-radius: 8px; padding: 2px 10px; font-size: 11px; color: #999; cursor: pointer;
 }
+.copy-btn.copied { border-color: var(--green); color: var(--green); }
 
-/* Quick Actions */
-.quick-actions {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    padding: 4px 0;
-    align-self: flex-start;
-    max-width: 100%;
-}
-.quick-btn {
-    background: white;
-    border: 1.5px solid var(--green);
-    color: var(--green);
-    padding: 6px 12px;
-    border-radius: 16px;
-    font-size: 13px;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: all 0.15s;
-}
-.quick-btn:hover, .quick-btn:active {
-    background: var(--green);
-    color: white;
-}
+@keyframes msgIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.typing .bubble::after { content: '⋯'; animation: dots 1.2s infinite; }
+@keyframes dots { 0%,20%{content:'⋯'} 40%{content:'⋯⋯'} 60%{content:'⋯⋯⋯'} }
 
-/* Typing indicator */
-.typing .bubble::after {
-    content: '⋯';
-    animation: dots 1s infinite;
-}
-@keyframes dots {
-    0%, 20% { content: '⋯'; }
-    40% { content: '⋯⋯'; }
-    60% { content: '⋯⋯⋯'; }
-}
-
-/* Input */
 .chat-input {
-    display: flex;
-    gap: 8px;
-    padding: 10px 12px;
-    background: #F7F8FA;
-    flex-shrink: 0;
-    border-top: 1px solid #E0E0E0;
+    display: flex; gap: 8px; padding: 10px 12px;
+    background: #F7F8FA; flex-shrink: 0; border-top: 1px solid #E0E0E0;
 }
 .chat-input input {
-    flex: 1;
-    border: 1px solid #DDD;
-    border-radius: 20px;
-    padding: 10px 16px;
-    font-size: 15px;
-    outline: none;
-    background: white;
+    flex: 1; border: 1px solid #DDD; border-radius: 20px;
+    padding: 10px 16px; font-size: 15px; outline: none; background: white;
 }
 .chat-input input:focus { border-color: var(--green); }
 .chat-input button {
-    background: var(--green);
-    color: white;
-    border: none;
-    border-radius: 50%;
-    width: 40px; height: 40px;
-    font-size: 18px;
-    cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
-    transition: transform 0.1s;
+    background: var(--green); color: white; border: none; border-radius: 50%;
+    width: 40px; height: 40px; font-size: 18px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
 .chat-input button:active { transform: scale(0.92); }
+
+.num-row {
+    display: flex; gap: 4px; padding: 6px 12px;
+    background: #F7F8FA; border-top: 1px solid #E0E0E0; flex-shrink: 0;
+}
+.num-btn {
+    flex: 1; border: 1px solid #DDD; border-radius: 8px;
+    background: white; font-size: 16px; font-weight: 500; color: #333;
+    padding: 8px 0; cursor: pointer; text-align: center;
+}
+.num-btn:active { background: var(--green); color: white; }
 </style>
 </head>
 <body>
@@ -189,106 +112,755 @@ body {
             <span>即時看診進度查詢</span>
         </div>
     </div>
-
-    <div class="chat-body" id="chatBody"></div>
-
+    <div class="chat-body" id="chatBody" onclick="document.getElementById('msgInput').blur()"></div>
+    <div class="num-row" id="numRow">
+        <button class="num-btn" onclick="tapNum('0')">0</button>
+        <button class="num-btn" onclick="tapNum('1')">1</button>
+        <button class="num-btn" onclick="tapNum('2')">2</button>
+        <button class="num-btn" onclick="tapNum('3')">3</button>
+        <button class="num-btn" onclick="tapNum('4')">4</button>
+        <button class="num-btn" onclick="tapNum('5')">5</button>
+        <button class="num-btn" onclick="tapNum('6')">6</button>
+        <button class="num-btn" onclick="tapNum('7')">7</button>
+        <button class="num-btn" onclick="tapNum('8')">8</button>
+        <button class="num-btn" onclick="tapNum('9')">9</button>
+    </div>
+    <div class="num-row" id="numRowMulti" style="display:none;">
+        <button class="num-btn" onclick="tapMulti('0')">0</button>
+        <button class="num-btn" onclick="tapMulti('1')">1</button>
+        <button class="num-btn" onclick="tapMulti('2')">2</button>
+        <button class="num-btn" onclick="tapMulti('3')">3</button>
+        <button class="num-btn" onclick="tapMulti('4')">4</button>
+        <button class="num-btn" onclick="tapMulti('5')">5</button>
+        <button class="num-btn" onclick="tapMulti('6')">6</button>
+        <button class="num-btn" onclick="tapMulti('7')">7</button>
+        <button class="num-btn" onclick="tapMulti('8')">8</button>
+        <button class="num-btn" onclick="tapMulti('9')">9</button>
+        <button class="num-btn" onclick="tapMultiDel()" style="font-size:14px;">⌫</button>
+    </div>
     <div class="chat-input">
-        <input type="text" id="msgInput" placeholder="輸入醫院名稱查詢..." autocomplete="off">
-        <button id="sendBtn" onclick="sendMessage()">▶</button>
+        <input type="text" id="msgInput" placeholder="輸入數字或醫院名稱..." autocomplete="off">
+        <button onclick="sendMessage()">▶</button>
     </div>
 </div>
 
 <script>
 const API_BASE = window.location.origin;
 const chatBody = document.getElementById('chatBody');
+
+let _sending = false;  // 防重複點擊
+
+// === Web Audio 音效 ===
+let _audioCtx = null;
+function getAudio() {
+    if (!_audioCtx) {
+        try {
+            _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        } catch (e) { return null; }
+    }
+    if (_audioCtx.state === 'suspended') _audioCtx.resume();
+    return _audioCtx;
+}
+
+// 通用單音
+function _beep(freq, dur, type = 'sine', vol = 0.15, delay = 0) {
+    const ctx = getAudio();
+    if (!ctx) return;
+    const t0 = ctx.currentTime + delay;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0, t0);
+    gain.gain.linearRampToValueAtTime(vol, t0 + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.02);
+}
+
+// 1. 打字聲（短促 click）
+function playTap() { _beep(1800, 0.04, 'square', 0.06); }
+
+// 2. 送出訊息（輕一聲）
+function playSend() { _beep(880, 0.08, 'sine', 0.10); }
+
+// 3. 號碼更新 ding（單音清脆）
+function playDing() { _beep(1320, 0.25, 'triangle', 0.18); }
+
+// 4. 快到/到我 dingdong（雙音）
+function playDingDong() {
+    _beep(1320, 0.22, 'triangle', 0.22, 0);
+    _beep(990, 0.32, 'triangle', 0.22, 0.18);
+}
+
+function tapNum(n) {
+    if (_sending) return;
+    playTap();
+    msgInput.value = n;
+    sendMessage();
+}
+
+function tapMulti(n) {
+    playTap();
+    msgInput.value += n;
+    msgInput.focus();
+}
+
+function tapMultiDel() {
+    playTap();
+    msgInput.value = msgInput.value.slice(0, -1);
+}
+
+function setMultiMode(on) {
+    document.getElementById('numRow').style.display = on ? 'none' : 'flex';
+    document.getElementById('numRowMulti').style.display = on ? 'flex' : 'none';
+    if (on) {
+        msgInput.value = '';
+        msgInput.placeholder = '輸入掛號號碼...';
+    } else {
+        msgInput.placeholder = '輸入數字或醫院名稱...';
+    }
+}
+
 const msgInput = document.getElementById('msgInput');
 
-// 醫院代碼對照（從 /api/hospitals 載入）
 let hospitals = [];
+let menuState = 'main';
+let menuOptions = {};
+let lastHospital = null;
+let lastProgressData = [];
+let pageItems = [];
+let pageIndex = 0;
+let pageContext = null;
 
-// 初始化
+// 返回堆疊：按 0 逐層返回
+let navStack = [];
+
+// 追蹤
+let activeTrack = null;    // { hospital, dept, doctor, room, userNumber, intervalId }
+let waitingForNumber = false;  // 等待用戶輸入掛號號碼
+
+// 用戶資料
+const urlParams = new URLSearchParams(location.search);
+if (urlParams.get('uid')) localStorage.setItem('line_user_id', urlParams.get('uid'));
+let lineUserId = localStorage.getItem('line_user_id') || '';
+let userFavorites = [];
+let userArea = localStorage.getItem('user_area') || '';
+
+// === 初始化 ===
 async function init() {
-    addBotMsg('👋 歡迎使用叮咚到號！\n\n輸入醫院名稱查詢即時看診進度\n例如：台大、長庚、馬偕\n\n💡 輸入「醫院」查看完整列表\n💡 輸入「頭痛」查詢該看哪科');
-
     try {
         const resp = await fetch(`${API_BASE}/api/hospitals`);
         const data = await resp.json();
         hospitals = data.hospitals || [];
-        showQuickActions(['台大醫院', '台北長庚', '馬偕醫院', '國泰醫院', '醫院列表']);
     } catch (e) {
-        addBotMsg('⚠️ 無法連線到伺服器，請稍後再試');
+        addBotMsg('無法連線，請稍後再試');
+        return;
     }
+    await loadFavorites();
+    await showMainMenu();
 }
 
-// 發送訊息
-async function sendMessage() {
-    const text = msgInput.value.trim();
-    if (!text) return;
-
-    addUserMsg(text);
-    msgInput.value = '';
-
-    const typingEl = addTyping();
-
+async function loadFavorites() {
+    if (!lineUserId) return;
     try {
-        const reply = await processMessage(text);
-        removeTyping(typingEl);
-        addBotMsg(reply.text);
-        if (reply.actions) showQuickActions(reply.actions);
-    } catch (e) {
-        removeTyping(typingEl);
-        addBotMsg('⚠️ 查詢失敗，請稍後再試');
-    }
+        const resp = await fetch(`${API_BASE}/api/liff/favorites/${lineUserId}`);
+        const data = await resp.json();
+        if (data.favorites && data.favorites.length > 0) userFavorites = data.favorites;
+    } catch (e) {}
 }
 
-// 處理訊息邏輯
-async function processMessage(text) {
-    const m = text.trim();
+// === 主選單 ===
+async function showMainMenu() {
+    navStack = [];
+    menuState = 'main';
+    menuOptions = { '2': 'list_area' };
 
-    // 醫院列表
-    if (['醫院', '列表', '有哪些', '支援', '全部'].some(k => m.includes(k))) {
-        return listHospitals();
+    await loadFavorites();
+
+    let lines = [];
+    if (activeTrack) {
+        lines.push('1 查追蹤進度');
+        menuOptions['1'] = 'check_tracking';
     }
+    lines.push('2 醫院列表');
+    lines.push('');
 
-    // 症狀查科別
-    if (['痛', '癢', '暈', '咳', '燒', '腫', '血', '喘', '吐', '瀉'].some(k => m.includes(k))) {
-        return await searchDepartmentGuide(m);
-    }
+    const maxSlots = 5;
+    const usedCodes = new Set();
+    const slots = [];
 
-    // 查看診進度
-    const hospital = findHospital(m);
-    if (hospital) {
-        return await fetchProgress(hospital, m);
-    }
-
-    // 搜尋醫院
-    if (m.length >= 2) {
-        const matched = hospitals.filter(h => h.name.includes(m));
-        if (matched.length > 0) {
-            return {
-                text: `🔍 找到 ${matched.length} 間符合的醫院：\n\n${matched.map(h => `• ${h.name}`).join('\n')}\n\n點擊醫院名稱查詢進度`,
-                actions: matched.slice(0, 5).map(h => h.name)
-            };
+    for (const f of userFavorites) {
+        if (slots.length >= maxSlots) break;
+        const h = hospitals.find(x => x.code === f.hospital_code);
+        if (h && !usedCodes.has(h.code)) {
+            slots.push({ hospital: h, name: f.hospital_name, star: true });
+            usedCodes.add(h.code);
         }
     }
 
-    return {
-        text: '🤔 找不到相關醫院\n\n💡 試試：\n• 輸入醫院名稱（如：台大、長庚）\n• 輸入症狀（如：頭痛、咳嗽）\n• 輸入「醫院」查看完整列表'
-    };
+    if (slots.length < maxSlots) {
+        const areas = groupByArea();
+        if (userArea && areas[userArea]) {
+            for (const h of areas[userArea]) {
+                if (slots.length >= maxSlots) break;
+                if (!usedCodes.has(h.code)) {
+                    slots.push({ hospital: h, name: h.name, star: false });
+                    usedCodes.add(h.code);
+                }
+            }
+        }
+        if (slots.length < maxSlots) {
+            const taipei = areas['台北市'] || [];
+            for (const h of taipei) {
+                if (slots.length >= maxSlots) break;
+                if (!usedCodes.has(h.code)) {
+                    slots.push({ hospital: h, name: h.name, star: false });
+                    usedCodes.add(h.code);
+                }
+            }
+        }
+    }
+
+    slots.forEach((s, idx) => {
+        const num = idx + 4;
+        const mark = s.star ? '⭐' : '';
+        lines.push(`${num} ${mark}${s.name}`);
+        menuOptions[String(num)] = { type: 'hospital', hospital: s.hospital };
+    });
+
+    addBotMsg(lines.join('\n'));
 }
 
-// 找醫院
+// === 分頁顯示 ===
+function showPage(items, state, title) {
+    pageItems = items;
+    pageContext = { state, title };
+    pageIndex = 0;
+    renderPage();
+}
+
+function renderPage() {
+    const perPage = 8;
+    const slice = pageItems.slice(pageIndex, pageIndex + perPage);
+    const total = pageItems.length;
+    const pageNum = Math.floor(pageIndex / perPage) + 1;
+    const totalPages = Math.ceil(total / perPage);
+
+    menuOptions = {};
+    menuState = pageContext.state;
+
+    let lines = [];
+    lines.push(totalPages > 1 ? `${pageContext.title} (${pageNum}/${totalPages})` : pageContext.title);
+    lines.push('');
+
+    slice.forEach((item, idx) => {
+        const num = idx + 1;
+        lines.push(`${num} ${item.label}`);
+        menuOptions[String(num)] = item.action;
+    });
+
+    lines.push('');
+    if (total > perPage) lines.push('9 下一頁');
+    lines.push('0 返回');
+
+    addBotMsg(lines.join('\n'));
+}
+
+function nextPage() {
+    pageIndex += 8;
+    if (pageIndex >= pageItems.length) pageIndex = 0;
+    renderPage();
+}
+
+// === 發送訊息 ===
+async function sendMessage() {
+    if (_sending) return;
+    const text = msgInput.value.trim();
+    if (!text) return;
+    _sending = true;
+    playSend();
+    addUserMsg(text);
+    msgInput.value = '';
+    await new Promise(r => setTimeout(r, 500));
+    try {
+        await processMessage(text);
+    } catch (e) {
+        console.error('processMessage error:', e);
+        addBotMsg('查詢失敗，請稍後再試\n\n0 返回');
+        menuState = 'error';
+    }
+    _sending = false;
+}
+
+// === 處理訊息 ===
+async function processMessage(text) {
+    const m = text.trim();
+
+    // 返回（追蹤中按 0 只回主頁，不停止追蹤）
+    if (m === '0' || m === '回') {
+        if (waitingForNumber) {
+            waitingForNumber = false;
+            setMultiMode(false);
+        }
+        if (navStack.length > 0) {
+            const back = navStack.pop();
+            await back();
+        } else {
+            await showMainMenu();
+        }
+        return;
+    }
+
+    // 等待輸入掛號號碼
+    if (waitingForNumber) {
+        if (m === '999') {
+            waitingForNumber = false;
+            setMultiMode(false);
+            startTracking(null);
+            return;
+        }
+        const num = parseInt(m);
+        if (num > 0) {
+            waitingForNumber = false;
+            setMultiMode(false);
+            startTracking(num);
+            return;
+        }
+        addBotMsg('請輸入掛號號碼（數字）\n或輸入 999 僅追蹤');
+        return;
+    }
+
+    // 下一頁
+    if (m === '9' && pageItems.length > 8) {
+        nextPage();
+        return;
+    }
+
+    // 數字選擇
+    if (menuOptions[m]) {
+        const action = menuOptions[m];
+
+        if (action === 'check_tracking') {
+            await checkTrackingNow();
+            return;
+        }
+        if (action === 'stop_tracking') {
+            stopAllTracking();
+            addBotMsg('追蹤已停止');
+            await new Promise(r => setTimeout(r, 300));
+            await showMainMenu();
+            return;
+        }
+        if (action === 'list_area') {
+            navStack.push(() => showMainMenu());
+            showAreaMenu();
+            return;
+        }
+
+        if (typeof action === 'object' && action.type === 'area') {
+            navStack.push(() => showAreaMenu());
+            showHospitalsByArea(action.area, action.list);
+            return;
+        }
+
+        if (typeof action === 'object' && action.type === 'hospital') {
+            navStack.push(() => showMainMenu());
+            await fetchProgress(action.hospital);
+            return;
+        }
+
+        if (typeof action === 'object' && action.type === 'dept') {
+            navStack.push(() => showDeptList(lastHospital));
+            showDeptProgress(lastHospital, action.dept);
+            return;
+        }
+
+        // 選醫師 → 開始追蹤流程
+        if (typeof action === 'object' && action.type === 'doctor') {
+            const doc = action.doctor;
+            // 停止之前的追蹤
+            if (activeTrack) {
+                clearInterval(activeTrack.intervalId);
+                if (activeTrack.skippedTimerId) clearInterval(activeTrack.skippedTimerId);
+            }
+            activeTrack = {
+                hospital: lastHospital,
+                hospitalCode: lastHospital.code,
+                dept: doc.department,
+                doctor: doc.doctor_name,
+                room: doc.clinic_room,
+                currentNumber: doc.current_number,
+                userNumber: null,
+                intervalId: null,
+                skippedRemindCount: 0,
+                skippedTimerId: null,
+            };
+            waitingForNumber = true;
+            setMultiMode(true);
+            addBotMsg(
+                `${doc.doctor_name} ${doc.clinic_room}\n` +
+                `目前看診：#${doc.current_number}\n\n` +
+                `請輸入您的掛號號碼\n或輸入 999 僅追蹤\n\n0 返回`
+            );
+            return;
+        }
+    }
+
+    // 文字輸入：找醫院
+    if (menuState === 'wait_hospital' || menuState === 'main') {
+        const hospital = findHospital(m);
+        if (hospital) {
+            navStack.push(() => showMainMenu());
+            await fetchProgress(hospital);
+            return;
+        }
+        const matched = hospitals.filter(h => h.name.includes(m));
+        if (matched.length > 0) {
+            navStack.push(() => showMainMenu());
+            showSearchResults(matched);
+            return;
+        }
+        addBotMsg(`找不到「${m}」\n0 返回`);
+        return;
+    }
+
+    // 文字輸入：症狀
+    if (menuState === 'wait_symptom') {
+        await searchSymptom(m);
+        return;
+    }
+
+    // 不認識的輸入 → 回主選單
+    await showMainMenu();
+}
+
+// === 地區選單 ===
+function showAreaMenu() {
+    const areas = groupByArea();
+    const items = [];
+    for (const [area, list] of Object.entries(areas)) {
+        if (list.length === 0) continue;
+        items.push({ label: `${area}(${list.length})`, action: { type: 'area', area, list } });
+    }
+    showPage(items, 'area', '選擇地區');
+}
+
+function showHospitalsByArea(area, list) {
+    userArea = area;
+    localStorage.setItem('user_area', area);
+    const items = list.map(h => ({ label: h.name, action: { type: 'hospital', hospital: h } }));
+    showPage(items, 'hospital_list', area);
+}
+
+function showSearchResults(matched) {
+    const items = matched.map(h => ({ label: h.name, action: { type: 'hospital', hospital: h } }));
+    showPage(items, 'search_result', `找到${matched.length}間`);
+}
+
+// === 查看診進度 ===
+async function fetchProgress(hospital) {
+    lastHospital = hospital;
+
+    if (lineUserId) {
+        fetch(`${API_BASE}/api/liff/favorite`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ line_user_id: lineUserId, hospital_code: hospital.code, hospital_name: hospital.name }),
+        }).catch(() => {});
+    }
+
+    const resp = await fetch(`${API_BASE}/api/progress/${hospital.code}`);
+    const data = await resp.json();
+
+    if (!data.data || data.data.length === 0) {
+        menuOptions = {};
+        menuState = 'no_data';
+        addBotMsg(`${hospital.name}\n目前無看診資料\n\n0 返回`);
+        return;
+    }
+
+    lastProgressData = data.data;
+    await showDeptList(hospital);
+}
+
+async function showDeptList(hospital) {
+    const depts = [...new Set(lastProgressData.map(r => r.department))].sort();
+
+    let favDepts = [];
+    if (lineUserId) {
+        try {
+            const resp = await fetch(`${API_BASE}/api/liff/favorites/${lineUserId}?hospital_code=${hospital.code}`);
+            const data = await resp.json();
+            favDepts = (data.favorites || []).map(f => f.department);
+        } catch (e) {}
+    }
+
+    const sorted = [];
+    for (const d of favDepts) { if (depts.includes(d)) sorted.push(d); }
+    for (const d of depts) { if (!sorted.includes(d)) sorted.push(d); }
+
+    const items = sorted.map(dept => {
+        const count = lastProgressData.filter(r => r.department === dept).length;
+        const isFav = favDepts.includes(dept);
+        return {
+            label: `${isFav ? '⭐' : ''}${dept}(${count})`,
+            action: { type: 'dept', dept },
+        };
+    });
+
+    showPage(items, 'dept_list', hospital.name);
+}
+
+function showDeptProgress(hospital, dept) {
+    if (lineUserId) {
+        fetch(`${API_BASE}/api/liff/favorite`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ line_user_id: lineUserId, hospital_code: hospital.code, hospital_name: hospital.name, department: dept }),
+        }).catch(() => {});
+    }
+
+    const results = lastProgressData.filter(r => r.department === dept);
+    if (results.length === 0) {
+        menuOptions = {};
+        menuState = 'progress';
+        addBotMsg(`${dept} 目前無資料\n\n0 返回`);
+        return;
+    }
+
+    const items = results.map(it => {
+        let num = `#${it.current_number}`;
+        if (it.is_current_skipped) num += '(過)';
+        const room = it.clinic_room || '';
+        return {
+            label: `${it.doctor_name} ${room} ${num}`,
+            action: { type: 'doctor', doctor: it },
+        };
+    });
+
+    showPage(items, 'progress', `${hospital.name} ${dept}`);
+}
+
+// === 追蹤看診號碼 ===
+function startTracking(userNumber) {
+    if (!activeTrack) return;
+    activeTrack.userNumber = userNumber;
+    menuState = 'tracking';
+    menuOptions = {};
+    navStack = [];  // 開始追蹤後，0 直接回主頁
+
+    const cur = activeTrack.currentNumber;
+    const next = cur + 1;
+    let msg = `開始追蹤\n`;
+    msg += `醫院：${activeTrack.hospital.name}\n`;
+    msg += `科別：${activeTrack.dept}\n`;
+    msg += `醫生：${activeTrack.doctor}\n`;
+    msg += `診間：${activeTrack.room}\n`;
+    msg += `目前號碼：#${cur}\n`;
+    msg += `下一號：#${next}`;
+    if (userNumber) {
+        const remaining = userNumber - cur;
+        if (remaining > 0) {
+            msg += `\n\n您是 ${userNumber} 號，前面還有約 ${remaining} 位`;
+        } else {
+            msg += `\n\n您是 ${userNumber} 號，已到或過號`;
+        }
+    }
+    msg += '\n\n每 30 秒自動更新\n0 回主頁';
+    addBotMsg(msg);
+
+    // 每 30 秒輪詢
+    activeTrack.intervalId = setInterval(() => pollTracking(), 30000);
+}
+
+// 立即查目前追蹤進度
+async function checkTrackingNow() {
+    if (!activeTrack) {
+        addBotMsg('目前沒有追蹤');
+        return;
+    }
+    try {
+        const resp = await fetch(`${API_BASE}/api/progress/${activeTrack.hospitalCode}`);
+        const data = await resp.json();
+        if (!data.data) {
+            addBotMsg('查詢失敗');
+            return;
+        }
+        const found = data.data.find(d =>
+            d.doctor_name === activeTrack.doctor &&
+            d.clinic_room === activeTrack.room
+        );
+        if (!found) {
+            addBotMsg(`${activeTrack.doctor} 看診已結束`);
+            clearInterval(activeTrack.intervalId);
+            activeTrack = null;
+            return;
+        }
+        activeTrack.currentNumber = found.current_number;
+
+        const cur = found.current_number;
+        const next = cur + 1;
+        let msg = `追蹤中\n`;
+        msg += `醫院：${activeTrack.hospital.name}\n`;
+        msg += `科別：${activeTrack.dept}\n`;
+        msg += `醫生：${activeTrack.doctor}\n`;
+        msg += `診間：${activeTrack.room}\n`;
+        msg += `目前號碼：#${cur}`;
+        if (found.is_current_skipped) msg += '(過號)';
+        msg += `\n下一號：#${next}`;
+
+        if (activeTrack.userNumber) {
+            const un = activeTrack.userNumber;
+            if (cur === un) {
+                msg += `\n\n🔔 輪到您了！${un} 號正在叫號`;
+            } else if (cur > un) {
+                msg += `\n\n⚠️ 您是 ${un} 號，已過號`;
+            } else {
+                msg += `\n\n您是 ${un} 號，還剩約 ${un - cur} 位`;
+            }
+        }
+
+        msg += '\n\n7 停止追蹤\n0 回主頁';
+        menuState = 'tracking_detail';
+        menuOptions = { '7': 'stop_tracking' };
+        addBotMsg(msg);
+    } catch (e) {
+        addBotMsg('查詢失敗');
+    }
+}
+
+async function pollTracking() {
+    if (!activeTrack) return;
+    try {
+        const resp = await fetch(`${API_BASE}/api/progress/${activeTrack.hospitalCode}`);
+        const data = await resp.json();
+        if (!data.data) return;
+
+        const found = data.data.find(d =>
+            d.doctor_name === activeTrack.doctor &&
+            d.clinic_room === activeTrack.room
+        );
+        if (!found) {
+            addBotMsg(`${activeTrack.doctor} 看診已結束\n\n0 返回`);
+            clearInterval(activeTrack.intervalId);
+            activeTrack = null;
+            return;
+        }
+
+        const prev = activeTrack.currentNumber;
+        activeTrack.currentNumber = found.current_number;
+
+        // 號碼沒變就不推播
+        if (found.current_number === prev) return;
+
+        // 過號 → 切換成「每分鐘提醒」模式，最多 3 次
+        if (activeTrack.userNumber && found.current_number > activeTrack.userNumber) {
+            startSkippedReminder();
+            return;
+        }
+
+        let msg = `${activeTrack.doctor} ${activeTrack.room}\n目前：#${found.current_number}`;
+        if (found.is_current_skipped) msg += '(過號)';
+
+        let soundType = 'ding';
+
+        if (activeTrack.userNumber) {
+            const un = activeTrack.userNumber;
+            if (found.current_number === un) {
+                msg += `\n\n🔔 輪到您了！${un} 號正在叫號！`;
+                soundType = 'dingdong';
+                clearInterval(activeTrack.intervalId);
+                activeTrack = null;
+            } else {
+                const remaining = un - found.current_number;
+                msg += `\n\n您是 ${un} 號，還剩約 ${remaining} 位`;
+                if (remaining <= 2) soundType = 'dingdong';
+            }
+        }
+
+        if (soundType === 'dingdong') playDingDong();
+        else playDing();
+
+        addBotMsg(msg);
+    } catch (e) {
+        console.error('pollTracking error:', e);
+    }
+}
+
+// 清掉所有追蹤計時器
+function stopAllTracking() {
+    if (!activeTrack) return;
+    if (activeTrack.intervalId) clearInterval(activeTrack.intervalId);
+    if (activeTrack.skippedTimerId) clearInterval(activeTrack.skippedTimerId);
+    activeTrack = null;
+}
+
+// 過號後的提醒：每分鐘 1 次，最多 3 次
+function startSkippedReminder() {
+    if (!activeTrack || activeTrack.skippedTimerId) return;
+    // 停掉 30 秒輪詢
+    if (activeTrack.intervalId) {
+        clearInterval(activeTrack.intervalId);
+        activeTrack.intervalId = null;
+    }
+    activeTrack.skippedRemindCount = 0;
+    sendSkippedReminder();
+    activeTrack.skippedTimerId = setInterval(sendSkippedReminder, 60000);
+}
+
+function sendSkippedReminder() {
+    if (!activeTrack) return;
+    activeTrack.skippedRemindCount++;
+    const n = activeTrack.skippedRemindCount;
+    const un = activeTrack.userNumber;
+    addBotMsg(
+        `⚠️ 您是 ${un} 號，已過號\n` +
+        `${activeTrack.doctor} ${activeTrack.room}\n` +
+        `提醒 ${n}/3`
+    );
+    playDingDong();
+    if (n >= 3) {
+        stopAllTracking();
+        addBotMsg('追蹤已結束\n如需重新追蹤請選擇診間');
+    }
+}
+
+// === 症狀查科別 ===
+async function searchSymptom(query) {
+    const resp = await fetch(`${API_BASE}/api/guide/which-department?q=${encodeURIComponent(query)}`);
+    const data = await resp.json();
+
+    if (!data.results || data.results.length === 0) {
+        addBotMsg(`找不到「${query}」相關科別\n建議到掛號櫃台詢問\n\n0 返回`);
+        return;
+    }
+
+    let lines = [`「${query}」建議掛：`];
+    const seen = new Set();
+    for (const r of data.results) {
+        if (seen.has(r.department)) continue;
+        seen.add(r.department);
+        lines.push(`• ${r.department} - ${r.disease}`);
+    }
+    lines.push('\n0 返回');
+    menuState = 'symptom_result';
+    menuOptions = {};
+    addBotMsg(lines.join('\n'));
+}
+
+// === 找醫院 ===
 function findHospital(text) {
-    // 精確匹配
     let found = hospitals.find(h => text.includes(h.name));
     if (found) return found;
 
-    // 簡稱匹配
     const aliases = {
         '台大': 'ntuh', '台大醫院': 'ntuh',
         '台大癌醫': 'ntuh-cancer', '癌醫': 'ntuh-cancer',
         '台大兒童': 'ntuh-children',
         '榮總': 'tpvgh', '台北榮總': 'tpvgh', '北榮': 'tpvgh',
+        '台中榮總': 'tcvgh', '中榮': 'tcvgh',
         '三總': 'tsgh', '三軍': 'tsgh',
         '長庚': 'changgung-linkou', '林口長庚': 'changgung-linkou',
         '台北長庚': 'changgung-taipei',
@@ -302,152 +874,38 @@ function findHospital(text) {
         '慈濟': 'tzuchi-taipei',
         '輔大': 'fjuh', '輔大醫院': 'fjuh',
     };
-
     for (const [alias, code] of Object.entries(aliases)) {
-        if (text.includes(alias)) {
-            return hospitals.find(h => h.code === code);
-        }
+        if (text.includes(alias)) return hospitals.find(h => h.code === code);
     }
     return null;
 }
 
-// 查看診進度
-async function fetchProgress(hospital, originalText) {
-    const resp = await fetch(`${API_BASE}/api/progress/${hospital.code}`);
-    const data = await resp.json();
-
-    if (!data.data || data.data.length === 0) {
-        return {
-            text: `🏥 ${hospital.name}\n\n目前沒有看診中的診間資料\n（可能為非看診時段或夜間）`,
-            actions: ['醫院列表']
-        };
-    }
-
-    // 篩選（如果用戶輸入了科別或醫師名）
-    let results = data.data;
-    const filter = originalText.replace(hospital.name, '').trim();
-    // 移除別名
-    for (const alias of Object.keys(findHospital.aliases || {})) {
-        if (originalText.includes(alias)) {
-            const f = originalText.replace(alias, '').trim();
-            if (f) {
-                const filtered = results.filter(r =>
-                    r.department.includes(f) || r.doctor_name.includes(f)
-                );
-                if (filtered.length > 0) results = filtered;
-            }
-            break;
-        }
-    }
-    if (filter) {
-        const filtered = results.filter(r =>
-            r.department.includes(filter) || r.doctor_name.includes(filter)
-        );
-        if (filtered.length > 0) results = filtered;
-    }
-
-    // 格式化
-    const now = new Date();
-    const ts = `${(now.getMonth()+1).toString().padStart(2,'0')}/${now.getDate().toString().padStart(2,'0')} ${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
-
-    // 按科別分組
-    const byDept = {};
-    for (const r of results) {
-        if (!byDept[r.department]) byDept[r.department] = [];
-        byDept[r.department].push(r);
-    }
-
-    let lines = [`🏥 ${hospital.name} 看診進度`, `⏰ ${ts}　共 ${results.length} 個診間`, ''];
-
-    for (const [dept, items] of Object.entries(byDept).sort()) {
-        lines.push(`📌 ${dept}`);
-        for (const it of items) {
-            let info = `👉 ${it.current_number}號`;
-            if (it.is_current_skipped) info += '(過號)';
-            if (it.next_number && it.next_number !== it.current_number) {
-                info += ` → ${it.next_number}號`;
-            }
-            const room = it.clinic_room ? ` [${it.clinic_room}]` : '';
-            const sess = it.session ? ` ${it.session}` : '';
-            lines.push(`  ${it.doctor_name}${room}${sess} ${info}`);
-        }
-        lines.push('');
-    }
-
-    // 取前幾個科別當快捷鍵
-    const depts = Object.keys(byDept).slice(0, 4);
-    const actions = depts.map(d => `${hospital.name} ${d}`);
-
-    return { text: lines.join('\n'), actions };
-}
-
-// 症狀查科別
-async function searchDepartmentGuide(query) {
-    const resp = await fetch(`${API_BASE}/api/guide/which-department?q=${encodeURIComponent(query)}`);
-    const data = await resp.json();
-
-    if (!data.results || data.results.length === 0) {
-        return { text: `🤔 找不到「${query}」相關的科別建議\n\n建議直接到醫院掛號櫃台詢問` };
-    }
-
-    let lines = [`🔍 「${query}」建議看哪科：\n`];
-    const seen = new Set();
-    for (const r of data.results) {
-        if (seen.has(r.department)) continue;
-        seen.add(r.department);
-        lines.push(`🏷️ ${r.department}（${r.category}）`);
-        lines.push(`   疾病：${r.disease}`);
-        lines.push(`   症狀：${r.symptoms}\n`);
-    }
-
-    return { text: lines.join('\n') };
-}
-
-// 醫院列表
-function listHospitals() {
-    // 按地區分組
-    const groups = {
-        '台北市': [], '新北市': [], '基隆': [], '桃園': [],
-        '台中': [], '雲嘉': [], '高雄': [], '其他': []
-    };
-
+// === 地區分組 ===
+function groupByArea() {
+    const groups = { '台北市': [], '新北市': [], '基隆': [], '桃園': [], '台中': [], '雲嘉': [], '高雄': [] };
     for (const h of hospitals) {
         const n = h.name;
         if (n.includes('台大') || n.includes('三軍') || n.includes('榮總') || n.includes('台北長庚') ||
             n.includes('國泰醫院') || n.includes('馬偕醫院(台北') || n.includes('新光') ||
             n.includes('萬芳') || n.includes('振興') || n.includes('台大癌醫') || n.includes('台大兒童'))
-            groups['台北市'].push(n);
+            groups['台北市'].push(h);
         else if (n.includes('亞東') || n.includes('慈濟') || n.includes('淡水') || n.includes('臺北醫院') ||
                  n.includes('汐止') || n.includes('土城') || n.includes('新北') || n.includes('輔大'))
-            groups['新北市'].push(n);
-        else if (n.includes('基隆')) groups['基隆'].push(n);
-        else if (n.includes('林口') || n.includes('桃園')) groups['桃園'].push(n);
-        else if (n.includes('豐原')) groups['台中'].push(n);
-        else if (n.includes('雲林') || n.includes('嘉義')) groups['雲嘉'].push(n);
-        else if (n.includes('高雄') || n.includes('鳳山')) groups['高雄'].push(n);
-        else groups['其他'].push(n);
+            groups['新北市'].push(h);
+        else if (n.includes('基隆')) groups['基隆'].push(h);
+        else if (n.includes('林口') || n.includes('桃園')) groups['桃園'].push(h);
+        else if (n.includes('台中') || n.includes('豐原')) groups['台中'].push(h);
+        else if (n.includes('雲林') || n.includes('嘉義')) groups['雲嘉'].push(h);
+        else if (n.includes('高雄') || n.includes('鳳山')) groups['高雄'].push(h);
     }
-
-    let lines = [`🏥 支援查詢的醫院（共 ${hospitals.length} 間）\n`];
-    for (const [area, list] of Object.entries(groups)) {
-        if (list.length === 0) continue;
-        lines.push(`【${area}】`);
-        for (const name of list) lines.push(`  • ${name}`);
-        lines.push('');
-    }
-    lines.push('💡 輸入醫院名稱即可查詢進度');
-
-    return {
-        text: lines.join('\n'),
-        actions: ['台大醫院', '台北長庚', '林口長庚', '國泰醫院', '馬偕醫院']
-    };
+    return groups;
 }
 
-// === UI 工具 ===
-
+// === UI ===
 function addBotMsg(text) {
     const row = document.createElement('div');
     row.className = 'msg-row bot';
+    const plainText = text;
     row.innerHTML = `<div class="bubble-avatar">🏥</div><div class="bubble">${escapeHtml(text)}</div>`;
     chatBody.appendChild(row);
     scrollDown();
@@ -461,50 +919,27 @@ function addUserMsg(text) {
     scrollDown();
 }
 
-function addTyping() {
-    const row = document.createElement('div');
-    row.className = 'msg-row bot typing';
-    row.innerHTML = `<div class="bubble-avatar">🏥</div><div class="bubble">查詢中</div>`;
-    chatBody.appendChild(row);
-    scrollDown();
-    return row;
-}
-
-function removeTyping(el) { if (el && el.parentNode) el.parentNode.removeChild(el); }
-
-function showQuickActions(labels) {
-    const container = document.createElement('div');
-    container.className = 'quick-actions';
-    for (const label of labels) {
-        const btn = document.createElement('button');
-        btn.className = 'quick-btn';
-        btn.textContent = label;
-        btn.onclick = () => {
-            msgInput.value = label;
-            sendMessage();
-        };
-        container.appendChild(btn);
-    }
-    chatBody.appendChild(container);
-    scrollDown();
-}
-
-function scrollDown() {
-    requestAnimationFrame(() => {
-        chatBody.scrollTop = chatBody.scrollHeight;
+function copyMsg(btn, encoded) {
+    const text = decodeURIComponent(encoded);
+    navigator.clipboard.writeText(text).then(() => {
+        btn.textContent = '✓ 已複製';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = '複製'; btn.classList.remove('copied'); }, 1500);
     });
 }
 
-function escapeHtml(text) {
-    return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+function scrollDown() {
+    requestAnimationFrame(() => { chatBody.scrollTop = chatBody.scrollHeight; });
 }
 
-// Enter 送出
+function escapeHtml(t) {
+    return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+}
+
 msgInput.addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.isComposing) sendMessage();
 });
 
-// 啟動
 init();
 </script>
 </body>

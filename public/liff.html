@@ -210,11 +210,20 @@ h1 {
             <span id="regStatus" class="info-value"></span>
         </div>
         <div class="info-row">
+            <span class="info-label">Bot 好友</span>
+            <span id="friendStatus" class="info-value"></span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">造訪次數</span>
+            <span id="visitCount" class="info-value"></span>
+        </div>
+        <div class="info-row">
             <span class="info-label">首次連結</span>
             <span id="createdAt" class="info-value"></span>
         </div>
 
-        <div class="success-badge">✓ 帳號已連結，可接收推播通知</div>
+        <div id="successBadge" class="success-badge">✓ 帳號已連結，可接收推播通知</div>
+        <div id="friendWarning" class="success-badge" style="display:none;background:#ff9800;">⚠ 請先加 Bot 好友才能接收通知</div>
 
         <a id="btnChat" class="btn-chat" href="/chat">開始查詢看診進度</a>
     </div>
@@ -252,7 +261,24 @@ async function initLiff() {
         // 4. 取得用戶資訊
         const profile = await liff.getProfile();
 
-        // 5. 註冊到後端
+        // 5. 收集所有可取得的資訊
+        const context = liff.getContext() || {};
+
+        // 取得好友狀態（需 try-catch，未加好友時可能失敗）
+        let isFriend = null;
+        try {
+            const friendship = await liff.getFriendship();
+            isFriend = friendship.friendFlag;
+        } catch (e) {}
+
+        // 取得 email（需 email scope + ID Token）
+        let email = null;
+        try {
+            const idToken = liff.getDecodedIDToken();
+            if (idToken && idToken.email) email = idToken.email;
+        } catch (e) {}
+
+        // 6. 註冊到後端（完整資料）
         const regRes = await fetch(`${API_BASE}/api/liff/register`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -261,6 +287,18 @@ async function initLiff() {
                 display_name: profile.displayName,
                 picture_url: profile.pictureUrl || null,
                 status_message: profile.statusMessage || null,
+                email: email,
+                os: liff.getOS() || null,
+                language: liff.getLanguage() || null,
+                is_in_client: liff.isInClient(),
+                is_friend: isFriend,
+                context_type: context.type || null,
+                context_view_type: context.viewType || null,
+                group_id: context.groupId || null,
+                room_id: context.roomId || null,
+                user_agent: navigator.userAgent,
+                screen_width: screen.width,
+                screen_height: screen.height,
             }),
         });
 
@@ -270,15 +308,17 @@ async function initLiff() {
 
         const data = await regRes.json();
 
-        // 6. 顯示用戶卡片
-        showUserCard(profile, data);
+        // 7. 存 userId 到 localStorage，跳轉 chat
+        localStorage.setItem('line_user_id', profile.userId);
+        localStorage.setItem('line_display_name', profile.displayName);
+        window.location.href = '/chat';
 
     } catch (err) {
         showError(err.message || '發生未知錯誤');
     }
 }
 
-function showUserCard(profile, data) {
+function showUserCard(profile, data, isFriend) {
     document.getElementById('loading').style.display = 'none';
     document.getElementById('userCard').style.display = 'block';
 
@@ -287,7 +327,21 @@ function showUserCard(profile, data) {
     document.getElementById('userStatus').textContent = profile.statusMessage || '';
     document.getElementById('userId').textContent = profile.userId.substring(0, 12) + '...';
     document.getElementById('regStatus').textContent = data.is_new ? '新用戶，已完成註冊' : '已註冊用戶';
+    document.getElementById('visitCount').textContent = `第 ${data.user.visit_count} 次`;
     document.getElementById('createdAt').textContent = formatDate(data.user.created_at);
+
+    // 好友狀態
+    if (isFriend === true) {
+        document.getElementById('friendStatus').textContent = '✓ 已加好友';
+        document.getElementById('friendStatus').style.color = '#2e7d32';
+    } else if (isFriend === false) {
+        document.getElementById('friendStatus').textContent = '✗ 未加好友';
+        document.getElementById('friendStatus').style.color = '#d32f2f';
+        document.getElementById('successBadge').style.display = 'none';
+        document.getElementById('friendWarning').style.display = 'inline-flex';
+    } else {
+        document.getElementById('friendStatus').textContent = '—';
+    }
 }
 
 function showError(msg) {
