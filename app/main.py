@@ -14,6 +14,7 @@ from app.api.webhook import router as webhook_router
 from app.api.admin import router as admin_router
 from app.api.test_harness import router as test_router
 from app.api.live_test import router as live_test_router
+from app.api.liff import router as liff_router
 from app.models.database import engine, Base
 
 # 確保所有 Model 都被 import，create_all 才能建立資料表
@@ -29,6 +30,7 @@ import app.models.department  # noqa: F401 (Department + DepartmentGuide)
 import app.models.doctor  # noqa: F401
 import app.models.tracking_feedback  # noqa: F401
 import app.models.analytics  # noqa: F401
+import app.models.liff_user  # noqa: F401
 
 # 設定 logging（結構化 JSON 日誌）
 try:
@@ -121,6 +123,7 @@ app.include_router(webhook_router)
 app.include_router(admin_router)
 app.include_router(test_router)
 app.include_router(live_test_router)
+app.include_router(liff_router)
 
 
 @app.get("/health")
@@ -398,6 +401,15 @@ from fastapi.responses import FileResponse
 async def chat_page():
     """對話式看診進度查詢頁面"""
     html_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "public", "index.html")
+    if os.path.exists(html_path):
+        return FileResponse(html_path, media_type="text/html")
+    return JSONResponse(status_code=404, content={"error": "頁面不存在"})
+
+
+@app.get("/liff")
+async def liff_page():
+    """LIFF 頁面 — 在 LINE 內開啟，取得用戶 LINE ID 並註冊"""
+    html_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "public", "liff.html")
     if os.path.exists(html_path):
         return FileResponse(html_path, media_type="text/html")
     return JSONResponse(status_code=404, content={"error": "頁面不存在"})

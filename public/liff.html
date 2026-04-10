@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>叮咚到號 — LINE 連結</title>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root { --green: #06C755; --bg: #f5f5f5; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    background: var(--bg);
+    min-height: 100dvh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.container {
+    width: 100%; max-width: 420px;
+    padding: 24px;
+    text-align: center;
+}
+
+.logo {
+    font-size: 48px;
+    margin-bottom: 8px;
+}
+
+h1 {
+    font-size: 22px;
+    color: #333;
+    margin-bottom: 4px;
+}
+
+.subtitle {
+    font-size: 14px;
+    color: #888;
+    margin-bottom: 32px;
+}
+
+/* 載入中 */
+.loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+}
+
+.spinner {
+    width: 40px; height: 40px;
+    border: 4px solid #e0e0e0;
+    border-top-color: var(--green);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.loading-text {
+    color: #666;
+    font-size: 14px;
+}
+
+/* 用戶卡片 */
+.user-card {
+    display: none;
+    background: #fff;
+    border-radius: 16px;
+    padding: 32px 24px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+}
+
+.avatar {
+    width: 80px; height: 80px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 3px solid var(--green);
+    margin-bottom: 16px;
+}
+
+.user-name {
+    font-size: 20px;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 4px;
+}
+
+.user-status {
+    font-size: 13px;
+    color: #999;
+    margin-bottom: 20px;
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 14px;
+}
+
+.info-row:last-child { border-bottom: none; }
+
+.info-label { color: #888; }
+
+.info-value {
+    color: #333;
+    font-weight: 500;
+    word-break: break-all;
+    text-align: right;
+    max-width: 60%;
+}
+
+.uid-badge {
+    background: #e8f5e9;
+    color: #2e7d32;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 12px;
+}
+
+.success-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--green);
+    color: #fff;
+    padding: 8px 20px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 500;
+    margin-top: 20px;
+}
+
+.btn-chat {
+    display: inline-block;
+    margin-top: 16px;
+    padding: 12px 32px;
+    background: var(--green);
+    color: #fff;
+    border: none;
+    border-radius: 24px;
+    font-size: 16px;
+    font-weight: 500;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.btn-chat:active { opacity: 0.8; }
+
+/* 錯誤 */
+.error-card {
+    display: none;
+    background: #fff;
+    border-radius: 16px;
+    padding: 32px 24px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+}
+
+.error-icon { font-size: 48px; margin-bottom: 12px; }
+
+.error-msg {
+    color: #d32f2f;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.btn-retry {
+    margin-top: 20px;
+    padding: 10px 24px;
+    background: #f5f5f5;
+    color: #333;
+    border: 1px solid #ddd;
+    border-radius: 20px;
+    font-size: 14px;
+    cursor: pointer;
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+    <div class="logo">🔔</div>
+    <h1>叮咚到號</h1>
+    <p class="subtitle">醫院看診進度通知</p>
+
+    <!-- 載入中 -->
+    <div id="loading" class="loading">
+        <div class="spinner"></div>
+        <div class="loading-text">正在連結 LINE 帳號...</div>
+    </div>
+
+    <!-- 用戶資訊 -->
+    <div id="userCard" class="user-card">
+        <img id="avatar" class="avatar" src="" alt="頭貼">
+        <div id="userName" class="user-name"></div>
+        <div id="userStatus" class="user-status"></div>
+
+        <div class="info-row">
+            <span class="info-label">LINE ID</span>
+            <span id="userId" class="info-value uid-badge"></span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">狀態</span>
+            <span id="regStatus" class="info-value"></span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">首次連結</span>
+            <span id="createdAt" class="info-value"></span>
+        </div>
+
+        <div class="success-badge">✓ 帳號已連結，可接收推播通知</div>
+
+        <a id="btnChat" class="btn-chat" href="/chat">開始查詢看診進度</a>
+    </div>
+
+    <!-- 錯誤 -->
+    <div id="errorCard" class="error-card">
+        <div class="error-icon">⚠️</div>
+        <div id="errorMsg" class="error-msg"></div>
+        <button class="btn-retry" onclick="location.reload()">重新嘗試</button>
+    </div>
+</div>
+
+<script>
+const API_BASE = location.origin;
+
+async function initLiff() {
+    try {
+        // 1. 取得 LIFF ID
+        const configRes = await fetch(`${API_BASE}/api/liff/config`);
+        if (!configRes.ok) {
+            throw new Error('LIFF_ID 未設定，請聯絡管理員');
+        }
+        const { liff_id } = await configRes.json();
+
+        // 2. 初始化 LIFF
+        await liff.init({ liffId: liff_id });
+
+        // 3. 檢查是否在 LINE 內開啟
+        if (!liff.isLoggedIn()) {
+            // 不在 LINE 內或未登入 → 跳轉 LINE Login
+            liff.login({ redirectUri: location.href });
+            return;
+        }
+
+        // 4. 取得用戶資訊
+        const profile = await liff.getProfile();
+
+        // 5. 註冊到後端
+        const regRes = await fetch(`${API_BASE}/api/liff/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                line_user_id: profile.userId,
+                display_name: profile.displayName,
+                picture_url: profile.pictureUrl || null,
+                status_message: profile.statusMessage || null,
+            }),
+        });
+
+        if (!regRes.ok) {
+            throw new Error('註冊失敗，請稍後再試');
+        }
+
+        const data = await regRes.json();
+
+        // 6. 顯示用戶卡片
+        showUserCard(profile, data);
+
+    } catch (err) {
+        showError(err.message || '發生未知錯誤');
+    }
+}
+
+function showUserCard(profile, data) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('userCard').style.display = 'block';
+
+    document.getElementById('avatar').src = profile.pictureUrl || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" fill="%23ccc"/><text x="50" y="55" text-anchor="middle" font-size="40" fill="white">👤</text></svg>';
+    document.getElementById('userName').textContent = profile.displayName;
+    document.getElementById('userStatus').textContent = profile.statusMessage || '';
+    document.getElementById('userId').textContent = profile.userId.substring(0, 12) + '...';
+    document.getElementById('regStatus').textContent = data.is_new ? '新用戶，已完成註冊' : '已註冊用戶';
+    document.getElementById('createdAt').textContent = formatDate(data.user.created_at);
+}
+
+function showError(msg) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('errorCard').style.display = 'block';
+    document.getElementById('errorMsg').textContent = msg;
+}
+
+function formatDate(isoStr) {
+    const d = new Date(isoStr);
+    return `${d.getFullYear()}/${(d.getMonth()+1).toString().padStart(2,'0')}/${d.getDate().toString().padStart(2,'0')}`;
+}
+
+// 啟動
+initLiff();
+</script>
+</body>
+</html>

@@ -77,6 +77,11 @@ class Settings:
         default_factory=lambda: os.getenv("ADMIN_LINE_USER_ID", "")
     )
 
+    # LIFF
+    liff_id: str = field(
+        default_factory=lambda: os.getenv("LIFF_ID", "")
+    )
+
     def __post_init__(self):
         # JWT secret 未設定時自動產生（每次重啟會變，正式環境務必設定）
         if not self.jwt_secret_key:
