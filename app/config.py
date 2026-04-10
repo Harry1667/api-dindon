@@ -82,6 +82,17 @@ class Settings:
         default_factory=lambda: os.getenv("LIFF_ID", "")
     )
 
+    # Web Push (PWA)
+    vapid_public_key: str = field(
+        default_factory=lambda: os.getenv("VAPID_PUBLIC_KEY", "")
+    )
+    vapid_private_key: str = field(
+        default_factory=lambda: os.getenv("VAPID_PRIVATE_KEY", "")
+    )
+    vapid_subject: str = field(
+        default_factory=lambda: os.getenv("VAPID_SUBJECT", "mailto:admin@dl-app.com")
+    )
+
     def __post_init__(self):
         # JWT secret 未設定時自動產生（每次重啟會變，正式環境務必設定）
         if not self.jwt_secret_key:

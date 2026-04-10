@@ -1,9 +1,11 @@
 """FastAPI 主程式入口"""
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
 from app.middleware.auth import verify_api_token, check_rate_limit
 from dotenv import load_dotenv
 
@@ -15,6 +17,7 @@ from app.api.admin import router as admin_router
 from app.api.test_harness import router as test_router
 from app.api.live_test import router as live_test_router
 from app.api.liff import router as liff_router
+from app.api.push import router as push_router
 from app.models.database import engine, Base
 
 # 確保所有 Model 都被 import，create_all 才能建立資料表
@@ -109,8 +112,6 @@ app = FastAPI(
 )
 
 # 全域例外處理 — 未捕獲的 500 錯誤轉統一 JSON 格式
-from fastapi.responses import JSONResponse
-
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"未捕獲的例外: {exc}", exc_info=True)
@@ -125,6 +126,60 @@ app.include_router(admin_router)
 app.include_router(test_router)
 app.include_router(live_test_router)
 app.include_router(liff_router)
+app.include_router(push_router)
+
+# === PWA 靜態資源 ===
+# aaPanel nginx 對 .json/.js/.png 做 try_files 後 deny,所以全部用無副檔名路徑
+
+_PUBLIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "public")
+_ICONS_DIR = os.path.join(_PUBLIC_DIR, "icons")
+
+_ICON_MAP = {
+    "192": "icon-192.png",
+    "512": "icon-512.png",
+    "maskable": "icon-maskable-512.png",
+    "favicon": "favicon-32.png",
+}
+
+
+@app.get("/api/pwa/manifest")
+async def pwa_manifest():
+    """PWA Web App Manifest"""
+    path = os.path.join(_PUBLIC_DIR, "manifest.json")
+    if os.path.exists(path):
+        return FileResponse(path, media_type="application/manifest+json")
+    return JSONResponse(status_code=404, content={"error": "manifest 不存在"})
+
+
+@app.get("/api/pwa/sw")
+async def service_worker():
+    """Service Worker — 加 Service-Worker-Allowed: / header 把 scope 擴大到 root"""
+    path = os.path.join(_PUBLIC_DIR, "sw.js")
+    if os.path.exists(path):
+        return FileResponse(
+            path,
+            media_type="application/javascript",
+            headers={
+                "Service-Worker-Allowed": "/",
+                "Cache-Control": "no-cache",
+            },
+        )
+    return JSONResponse(status_code=404, content={"error": "sw 不存在"})
+
+
+@app.get("/api/pwa/icon/{key}")
+async def pwa_icon(key: str):
+    """PWA icon — 用 key (192/512/maskable/favicon) 而非檔名,避開 nginx .png 攔截"""
+    if key not in _ICON_MAP:
+        return JSONResponse(status_code=404, content={"error": "icon not found"})
+    path = os.path.join(_ICONS_DIR, _ICON_MAP[key])
+    if not os.path.exists(path):
+        return JSONResponse(status_code=404, content={"error": "icon file missing"})
+    return FileResponse(
+        path,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @app.get("/health")
@@ -395,9 +450,6 @@ async def search_pharmacy(area: str, limit: int = 5):
 
 
 # === 靜態網頁（對話式查詢介面）===
-import os
-from fastapi.responses import FileResponse
-
 @app.get("/chat")
 async def chat_page():
     """對話式看診進度查詢頁面"""

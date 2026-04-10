@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>叮咚到號 — 醫院看診進度查詢</title>
+<!-- PWA -->
+<link rel="manifest" href="/api/pwa/manifest">
+<meta name="theme-color" content="#FFFFFF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="叮咚到號">
+<link rel="apple-touch-icon" href="/api/pwa/icon/192">
+<link rel="icon" type="image/png" sizes="32x32" href="/api/pwa/icon/favicon">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 :root { --green: #06C755; --bg: #7494C0; }
@@ -1001,6 +1009,197 @@ msgInput.addEventListener('keydown', e => {
 });
 
 init();
+</script>
+
+<!-- ===== PWA: Service Worker + Web Push 訂閱 ===== -->
+<script>
+(function() {
+    'use strict';
+
+    // 從 query string 取 line_user_id(LIFF 入口會帶)
+    const _qs = new URLSearchParams(location.search);
+    const _lineUid = _qs.get('uid') || _qs.get('line_user_id') || null;
+
+    // localStorage key
+    const LS_PUSH_ASKED = 'dindon_push_asked';
+    const LS_INSTALL_HINT = 'dindon_install_hint_shown';
+
+    // 偵測平台
+    const ua = navigator.userAgent;
+    const isIOS = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+    const isAndroid = /Android/.test(ua);
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+        || window.navigator.standalone === true;
+
+    // === 1. 註冊 Service Worker ===
+    async function registerSW() {
+        if (!('serviceWorker' in navigator)) {
+            console.log('[PWA] Service Worker 不支援');
+            return null;
+        }
+        try {
+            const reg = await navigator.serviceWorker.register('/api/pwa/sw', { scope: '/' });
+            console.log('[PWA] SW registered:', reg.scope);
+            return reg;
+        } catch (e) {
+            console.error('[PWA] SW register failed:', e);
+            return null;
+        }
+    }
+
+    // === 2. URL-safe base64 → Uint8Array(VAPID public key 用)===
+    function urlBase64ToUint8Array(base64String) {
+        const padding = '='.repeat((4 - base64String.length % 4) % 4);
+        const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const rawData = atob(base64);
+        const out = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; ++i) out[i] = rawData.charCodeAt(i);
+        return out;
+    }
+
+    // === 3. 訂閱 Web Push ===
+    async function subscribePush(reg) {
+        if (!reg || !('PushManager' in window)) {
+            console.log('[PWA] Push 不支援');
+            return null;
+        }
+
+        // 取 VAPID public key
+        let vapidKey;
+        try {
+            const r = await fetch('/api/push/vapid-key');
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const data = await r.json();
+            vapidKey = data.public_key;
+        } catch (e) {
+            console.error('[PWA] 取 VAPID key 失敗:', e);
+            return null;
+        }
+
+        // 訂閱
+        let sub;
+        try {
+            sub = await reg.pushManager.getSubscription();
+            if (!sub) {
+                sub = await reg.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: urlBase64ToUint8Array(vapidKey),
+                });
+            }
+        } catch (e) {
+            console.error('[PWA] subscribe 失敗:', e);
+            return null;
+        }
+
+        // 送回後端
+        try {
+            const r = await fetch('/api/push/subscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    line_user_id: _lineUid,
+                    subscription: sub.toJSON(),
+                    user_agent: navigator.userAgent,
+                    platform: isIOS ? 'ios' : (isAndroid ? 'android' : 'desktop'),
+                }),
+            });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            console.log('[PWA] subscribe 已送後端');
+            return sub;
+        } catch (e) {
+            console.error('[PWA] 送後端失敗:', e);
+            return null;
+        }
+    }
+
+    // === 4. 詢問通知權限的 UI(只在用戶第一次互動後)===
+    async function maybeAskPermission(reg) {
+        if (!('Notification' in window)) return;
+        if (Notification.permission === 'granted') {
+            await subscribePush(reg);
+            return;
+        }
+        if (Notification.permission === 'denied') return;
+        if (localStorage.getItem(LS_PUSH_ASKED) === 'yes') return;
+
+        // iOS 必須先加到主畫面
+        if (isIOS && !isStandalone) {
+            // 不在這邊纏用戶,iOS install hint 由另一個 function 處理
+            return;
+        }
+
+        // Android / desktop:直接 prompt
+        try {
+            const perm = await Notification.requestPermission();
+            localStorage.setItem(LS_PUSH_ASKED, 'yes');
+            if (perm === 'granted') {
+                await subscribePush(reg);
+            }
+        } catch (e) {
+            console.error('[PWA] requestPermission failed:', e);
+        }
+    }
+
+    // === 5. iOS「加到主畫面」引導 ===
+    function showIOSInstallHint() {
+        if (!isIOS || isStandalone) return;
+        if (localStorage.getItem(LS_INSTALL_HINT) === 'yes') return;
+
+        // 等 4 秒後再提示,避免打斷初始體驗
+        setTimeout(() => {
+            const banner = document.createElement('div');
+            banner.style.cssText = `
+                position: fixed; bottom: 0; left: 0; right: 0;
+                background: white; border-top: 2px solid #06C755;
+                padding: 14px 16px; font-size: 13px; color: #333;
+                z-index: 9999; box-shadow: 0 -4px 12px rgba(0,0,0,0.1);
+                line-height: 1.5;
+            `;
+            banner.innerHTML = `
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <div style="flex:1;">
+                        💡 想收到看診叫號通知嗎?<br>
+                        點下方 <strong>分享 ⬆️</strong> → 選「<strong>加入主畫面</strong>」
+                    </div>
+                    <button id="dindon-hint-close" style="
+                        background: #06C755; color: white; border: none;
+                        padding: 8px 14px; border-radius: 8px; font-size: 13px;
+                    ">知道了</button>
+                </div>
+            `;
+            document.body.appendChild(banner);
+            document.getElementById('dindon-hint-close').onclick = () => {
+                banner.remove();
+                localStorage.setItem(LS_INSTALL_HINT, 'yes');
+            };
+        }, 4000);
+    }
+
+    // === 6. 初始化 ===
+    async function initPWA() {
+        const reg = await registerSW();
+        if (!reg) return;
+
+        // 等用戶有第一次互動後再 prompt 權限(iOS 規範,Android 較鬆)
+        const askOnce = async () => {
+            document.removeEventListener('click', askOnce);
+            document.removeEventListener('touchstart', askOnce);
+            await maybeAskPermission(reg);
+        };
+        document.addEventListener('click', askOnce, { once: true });
+        document.addEventListener('touchstart', askOnce, { once: true });
+
+        // iOS 安裝提示
+        showIOSInstallHint();
+    }
+
+    // 啟動
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initPWA);
+    } else {
+        initPWA();
+    }
+})();
 </script>
 </body>
 </html>
