@@ -48,7 +48,7 @@ class MohwOregAdapter(BaseHospitalAdapter):
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "X-Requested-With": "XMLHttpRequest",
-            "Referer": f"{BASE_URL}/VisitProgressPage",
+            "Referer": f"{self._api_base}/VisitProgressPage",
         }
 
         try:

@@ -249,6 +249,10 @@ class NotifierService:
         track_log(task.id, "notify", message[:300])
         try:
             await self.line_bot.push_message(line_user_id, message)
+            try:
+                await self.cache.redis.incr("monitor:line_notify_count")
+            except Exception:
+                pass
         except Exception as e:
             logger.error(f"[notifier] 推播失敗 task={task.id}: {e}")
             return  # 推播失敗，不更新 DB，下次重試
@@ -270,6 +274,10 @@ class NotifierService:
         # Step 1: 先推播，失敗就不改 DB
         try:
             await self.line_bot.push_message(line_user_id, message)
+            try:
+                await self.cache.redis.incr("monitor:line_notify_count")
+            except Exception:
+                pass
         except Exception as e:
             logger.error(f"[notifier] 推播失敗 task={task.id}: {e}")
             return  # 推播失敗，不標記完成，下次重試

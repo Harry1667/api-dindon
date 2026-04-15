@@ -12,12 +12,15 @@ redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
 celery_app = Celery(
     "medical_queue",
     broker=redis_url,
-    backend=redis_url,
+    # backend 不設定：沒有任何地方呼叫 .get()，省 Redis 寫入開銷
 )
 
 celery_app.conf.update(
     # 時區
     timezone="Asia/Taipei",
+
+    # Celery 6.0+ 相容設定
+    broker_connection_retry_on_startup=True,
     enable_utc=True,
 
     # 任務序列化
@@ -31,7 +34,7 @@ celery_app.conf.update(
     task_time_limit=660,
 
     # 自動發現任務
-    include=["app.tasks.scrape", "app.tasks.notify", "app.tasks.nhi_sync", "app.tasks.sync_master_data", "app.tasks.test_scheduler"],
+    include=["app.tasks.scrape", "app.tasks.notify", "app.tasks.nhi_sync", "app.tasks.sync_master_data", "app.tasks.test_scheduler", "app.tasks.maintenance", "app.tasks.metrics"],
 
     # 路由：notify 用獨立 queue，不被爬蟲擋住
     task_routes={
@@ -64,6 +67,16 @@ celery_app.conf.update(
         # 每分鐘檢查排程測試
         "check-test-schedule": {
             "task": "app.tasks.test_scheduler.check_scheduled_test",
+            "schedule": 60,
+        },
+        # 每天凌晨 2 點清理超過 7 天的 clinic_progress 舊資料
+        "cleanup-old-progress-daily": {
+            "task": "app.tasks.maintenance.cleanup_old_progress",
+            "schedule": crontab(hour=2, minute=0),
+        },
+        # 每分鐘收集系統指標（壓力負載圖）
+        "collect-metrics-every-minute": {
+            "task": "app.tasks.metrics.collect_metrics",
             "schedule": 60,
         },
     },

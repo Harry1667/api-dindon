@@ -39,6 +39,16 @@ class LineBotService:
         self.cache = CacheService()
         self.tracker = TrackerService()
 
+    async def aclose(self):
+        """關閉底層 aiohttp session，避免 Unclosed client session 警告"""
+        await self.api_client.close()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        await self.aclose()
+
     async def handle_text_message(self, user_id: str, text: str, reply_token: str):
         """處理用戶文字訊息"""
         text = text.strip()

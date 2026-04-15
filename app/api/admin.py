@@ -504,6 +504,7 @@ ADMIN_HTML = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>叮咚到號 — 後台管理</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family: -apple-system, 'Segoe UI', Roboto, 'Noto Sans TC', sans-serif; background:#f0f2f5; color:#333; }
@@ -618,6 +619,7 @@ th.sortable span { font-size:10px; }
     <button id="tabFeedback" onclick="switchTab('feedback')">回饋記錄</button>
     <button id="tabTest" onclick="switchTab('test')">系統測試</button>
     <button id="tabLive" onclick="switchTab('live')">即時追蹤測試</button>
+    <button id="tabMonitor" onclick="switchTab('monitor')">負載監控</button>
     <button class="logout" onclick="doLogout()">登出</button>
   </div>
 </div>
@@ -714,6 +716,58 @@ th.sortable span { font-size:10px; }
       <th>掛號</th><th>開始時號碼</th><th>目前號碼</th><th>剩餘</th><th>狀態</th>
     </tr></thead><tbody id="liveBody"></tbody></table>
   </div>
+</div>
+
+<!-- 負載監控頁 -->
+<div class="container hidden" id="pageMonitor">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <h2 style="font-size:16px;margin:0;">系統負載監控</h2>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <select id="monitorHours" onchange="loadMonitor()" style="padding:5px;border:1px solid #ddd;border-radius:6px;font-size:13px;">
+        <option value="1">最近 1 小時</option>
+        <option value="3">最近 3 小時</option>
+        <option value="6">最近 6 小時</option>
+        <option value="12">最近 12 小時</option>
+        <option value="24">最近 24 小時</option>
+      </select>
+      <button onclick="loadMonitor()" style="padding:6px 14px;border:1px solid #4a90d9;border-radius:6px;background:#fff;color:#4a90d9;cursor:pointer;font-size:13px;">🔄 刷新</button>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+    <div style="background:#fff;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;">
+      <div style="font-size:13px;color:#666;margin-bottom:8px;">每分鐘 DB 寫入筆數（爬蟲產出量）</div>
+      <canvas id="chartDbWrites" height="100"></canvas>
+    </div>
+    <div style="background:#fff;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;">
+      <div style="font-size:13px;color:#666;margin-bottom:8px;">活躍醫院數（有回傳資料）</div>
+      <canvas id="chartHospitals" height="100"></canvas>
+    </div>
+    <div style="background:#fff;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;">
+      <div style="font-size:13px;color:#666;margin-bottom:8px;">LINE 通知發送數 / 分鐘</div>
+      <canvas id="chartLineNotify" height="100"></canvas>
+    </div>
+    <div style="background:#fff;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;">
+      <div style="font-size:13px;color:#666;margin-bottom:8px;">Active 追蹤任務數</div>
+      <canvas id="chartActiveTasks" height="100"></canvas>
+    </div>
+    <div style="background:#fff;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;">
+      <div style="font-size:13px;color:#666;margin-bottom:8px;">降速中醫院數（無資料 / 被封）</div>
+      <canvas id="chartSlowdown" height="100"></canvas>
+    </div>
+    <div style="background:#fff;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;">
+      <div style="font-size:13px;color:#666;margin-bottom:8px;">每輪爬蟲耗時（秒）</div>
+      <canvas id="chartDuration" height="100"></canvas>
+    </div>
+    <div style="background:#fff;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;">
+      <div style="font-size:13px;color:#666;margin-bottom:8px;">Redis Queue 積壓數</div>
+      <canvas id="chartQueue" height="100"></canvas>
+    </div>
+    <div style="background:#fff;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;">
+      <div style="font-size:13px;color:#666;margin-bottom:8px;">爬蟲錯誤累計數</div>
+      <canvas id="chartErrors" height="100"></canvas>
+    </div>
+  </div>
+  <div id="monitorStatus" style="margin-top:12px;font-size:12px;color:#aaa;text-align:right;"></div>
 </div>
 
 <!-- 系統測試頁 -->
@@ -890,7 +944,7 @@ async function doLogout() {
 // ===== 切頁 =====
 function switchTab(tab) {
   currentTab = tab;
-  for (const p of ['Stats','Hospitals','Shortcuts','Feedback','Test','Live']) {
+  for (const p of ['Stats','Hospitals','Shortcuts','Feedback','Test','Live','Monitor']) {
     document.getElementById('page'+p).classList.toggle('hidden', tab !== p.toLowerCase());
     document.getElementById('tab'+p).classList.toggle('active', tab === p.toLowerCase());
   }
@@ -900,6 +954,7 @@ function switchTab(tab) {
   if (tab === 'feedback') loadFeedback();
   if (tab === 'test') loadTestEnv();
   if (tab === 'live') checkLiveTest();
+  if (tab === 'monitor') loadMonitor();
 }
 
 // ===== 統計 =====
@@ -1692,6 +1747,64 @@ async function resetShortcuts() {
       setTimeout(() => msg.textContent = '', 3000);
     }
   } catch(e) {}
+}
+
+// ===== 負載監控 =====
+let _charts = {};
+
+function _makeChart(id, label, color, data, labels) {
+  if (_charts[id]) _charts[id].destroy();
+  const ctx = document.getElementById(id).getContext('2d');
+  _charts[id] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label,
+        data,
+        borderColor: color,
+        backgroundColor: color + '22',
+        borderWidth: 2,
+        pointRadius: 2,
+        fill: true,
+        tension: 0.3,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { font: { size: 10 }, maxTicksLimit: 12 } },
+        y: { beginAtZero: true, ticks: { font: { size: 10 } } }
+      }
+    }
+  });
+}
+
+async function loadMonitor() {
+  try {
+    const hours = document.getElementById('monitorHours')?.value || 1;
+    const r = await fetch(`/api/admin/metrics-history?hours=${hours}`);
+    if (!r.ok) { document.getElementById('monitorStatus').textContent = '無法取得資料'; return; }
+    const d = await r.json();
+    const metrics = d.metrics || [];
+    const labels = metrics.map(m => m.ts);
+    _makeChart('chartDbWrites', 'DB 寫入', '#4a90d9', metrics.map(m => m.db_writes), labels);
+    _makeChart('chartHospitals', '活躍醫院', '#27ae60', metrics.map(m => m.active_hospitals), labels);
+    _makeChart('chartQueue', 'Queue 積壓', '#e67e22', metrics.map(m => m.redis_queue), labels);
+    _makeChart('chartErrors', '爬蟲錯誤', '#e74c3c', metrics.map(m => m.scraper_errors), labels);
+    _makeChart('chartLineNotify', 'LINE 通知', '#9b59b6', metrics.map(m => m.line_notifications), labels);
+    _makeChart('chartActiveTasks', 'Active 任務', '#1abc9c', metrics.map(m => m.active_tasks), labels);
+    _makeChart('chartSlowdown', '降速醫院', '#f39c12', metrics.map(m => m.slowdown_hospitals), labels);
+    _makeChart('chartDuration', '爬蟲耗時(秒)', '#34495e', metrics.map(m => m.scrape_duration), labels);
+    const hasReal = metrics.some(m => m.db_writes > 0 || m.active_hospitals > 0 || m.active_tasks > 0);
+    const latest = metrics[metrics.length - 1];
+    document.getElementById('monitorStatus').textContent = hasReal
+      ? `最新資料：${latest.ts}　共 ${metrics.length} 筆`
+      : `圖表已載入（尚無實際資料，每分鐘收集一次）`;
+  } catch(e) {
+    document.getElementById('monitorStatus').textContent = '載入失敗：' + e.message;
+  }
 }
 </script>
 </body>

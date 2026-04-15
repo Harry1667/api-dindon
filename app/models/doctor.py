@@ -15,7 +15,7 @@ class Doctor(Base):
     hospital_code: Mapped[str] = mapped_column(String(50), nullable=False, comment="醫院代碼")
     department: Mapped[str] = mapped_column(String(100), nullable=False, comment="科別名稱")
     name: Mapped[str] = mapped_column(String(50), nullable=False, comment="醫師姓名")
-    clinic_room: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="最近看診的診間號碼")
+    clinic_room: Mapped[str | None] = mapped_column(Text, nullable=True, comment="最近看診的診間號碼")
     title: Mapped[str] = mapped_column(String(50), nullable=False, default="", comment="職稱，如 主任醫師、主治醫師")
     specialty: Mapped[str | None] = mapped_column(Text, nullable=True, comment="專長描述")
     education: Mapped[str | None] = mapped_column(Text, nullable=True, comment="學歷")

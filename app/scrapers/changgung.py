@@ -58,7 +58,7 @@ class ChangGungAdapter(BaseHospitalAdapter):
                         )
                         all_results.extend(results)
                     except Exception as e:
-                        logger.warning(
+                        logger.debug(
                             f"[{self.hospital_code}] dept={dept_code} "
                             f"time={time_code} 失敗: {e}"
                         )

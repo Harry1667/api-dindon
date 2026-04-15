@@ -1,0 +1,54 @@
+services:
+  # === Celery Worker（爬蟲 + 通知，NAS 執行）===
+  worker:
+    image: ajz-dindon:latest
+    build: .
+    container_name: medqueue-worker
+    command: celery -A app.tasks.celery_app worker --loglevel=warning --concurrency=1 -Q celery,notify --max-tasks-per-child=50
+    env_file:
+      - .env
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    deploy:
+      resources:
+        limits:
+          memory: 400M
+        reservations:
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "celery", "-A", "app.tasks.celery_app", "inspect", "ping", "-d", "celery@$$HOSTNAME", "--timeout", "5"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # === Celery Beat（排程器，NAS 執行）===
+  beat:
+    image: ajz-dindon:latest
+    build: .
+    container_name: medqueue-beat
+    command: celery -A app.tasks.celery_app beat --loglevel=warning --schedule=/app/data/celerybeat-schedule
+    env_file:
+      - .env
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    deploy:
+      resources:
+        limits:
+          memory: 160M
+        reservations:
+          memory: 32M
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"

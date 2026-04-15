@@ -72,10 +72,10 @@ AdapterRegistry.register(ChghAdapter())                # 振興醫院
 
 # --- 新北市 ---
 AdapterRegistry.register(FemhAdapter())                # 亞東醫院
-AdapterRegistry.register(tzuchi_taipei)                # 台北慈濟醫院
-AdapterRegistry.register(tzuchi_xindian)               # 台北慈濟(新店)
+# AdapterRegistry.register(tzuchi_taipei)              # 台北慈濟醫院 — AWS IP 封鎖，連線 timeout
+# AdapterRegistry.register(tzuchi_xindian)             # 台北慈濟(新店) — AWS IP 封鎖，連線 timeout
 AdapterRegistry.register(mackay_tamsui)                # 馬偕醫院 淡水
-AdapterRegistry.register(tph_adapter)                  # 衛福部臺北醫院
+# AdapterRegistry.register(tph_adapter)                # 衛福部臺北醫院 — AWS IP 封鎖，403
 AdapterRegistry.register(cathay_xizhi)                 # 汐止國泰
 AdapterRegistry.register(tucheng_changgung)            # 土城長庚
 AdapterRegistry.register(banqiao_adapter)              # 新北聯合醫院 板橋
@@ -91,7 +91,7 @@ AdapterRegistry.register(taoyuan_changgung)            # 桃園長庚
 
 # --- 台中 ---
 AdapterRegistry.register(TcvghAdapter())               # 台中榮總
-AdapterRegistry.register(fyh_adapter)                  # 衛福部豐原醫院
+# AdapterRegistry.register(fyh_adapter)                # 衛福部豐原醫院 — AWS IP 封鎖，403
 
 # --- 雲嘉 ---
 AdapterRegistry.register(yunlin_changgung)             # 雲林長庚
@@ -100,4 +100,4 @@ AdapterRegistry.register(chiayi_changgung)             # 嘉義長庚
 # --- 高雄 ---
 AdapterRegistry.register(kaohsiung_changgung)          # 高雄長庚
 AdapterRegistry.register(fengshan_changgung)           # 鳳山長庚
-AdapterRegistry.register(KaohsiungUnitedAdapter())     # 高雄聯合醫院
+# AdapterRegistry.register(KaohsiungUnitedAdapter())   # 高雄聯合醫院 — 連線失敗（API 無回應）

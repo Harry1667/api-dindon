@@ -104,7 +104,7 @@ class Settings:
         return (
             f"mysql+aiomysql://{self.mysql_user}:{self.mysql_password}"
             f"@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}"
-            f"?charset=utf8mb4"
+            f"?charset=utf8mb4&init_command=SET+time_zone%3D%27%2B08%3A00%27"
         )
 
     @property
@@ -112,7 +112,7 @@ class Settings:
         return (
             f"mysql+pymysql://{self.mysql_user}:{self.mysql_password}"
             f"@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}"
-            f"?charset=utf8mb4"
+            f"?charset=utf8mb4&init_command=SET+time_zone%3D%27%2B08%3A00%27"
         )
 
 

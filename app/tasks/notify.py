@@ -68,4 +68,5 @@ async def _check():
         notifier = NotifierService(session_factory=task_session)
         await notifier.check_and_notify()
     finally:
+        await notifier.line_bot.aclose()
         await task_engine.dispose()

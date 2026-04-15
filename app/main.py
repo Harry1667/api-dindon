@@ -338,6 +338,68 @@ async def trigger_nhi_sync(types: list[str] | None = None):
     return {"task_id": task.id, "status": "queued"}
 
 
+@app.get("/api/admin/metrics-history")
+async def metrics_history(hours: int = 1):
+    """取得系統指標歷史（壓力負載圖用）
+    hours: 查詢最近幾小時，預設 1，最多 24
+    無資料的時段補 0，確保圖表有連續時間軸
+    """
+    from sqlalchemy import text as sa_text
+    from datetime import datetime, timezone, timedelta
+    from app.models.database import async_session
+    hours = min(hours, 24)
+    try:
+        async with async_session() as session:
+            result = await session.execute(sa_text(
+                "SELECT recorded_at, redis_queue, db_writes, active_hospitals, scraper_errors, "
+                "line_notifications, slowdown_hospitals, active_tasks, scrape_duration, worker_mem_mb "
+                "FROM system_metrics "
+                "WHERE recorded_at >= NOW() - INTERVAL :h HOUR "
+                "ORDER BY recorded_at ASC"
+            ), {"h": hours})
+            rows = result.fetchall()
+
+        # 把 DB 資料按分鐘 index 放入 map
+        row_map: dict[str, dict] = {}
+        for row in rows:
+            key = row.recorded_at.strftime("%H:%M")
+            row_map[key] = {
+                "ts": key,
+                "ts_epoch": int(row.recorded_at.timestamp()),
+                "redis_queue": row.redis_queue or 0,
+                "db_writes": row.db_writes or 0,
+                "active_hospitals": row.active_hospitals or 0,
+                "scraper_errors": row.scraper_errors or 0,
+                "line_notifications": row.line_notifications or 0,
+                "slowdown_hospitals": row.slowdown_hospitals or 0,
+                "active_tasks": row.active_tasks or 0,
+                "scrape_duration": row.scrape_duration or 0,
+                "worker_mem_mb": row.worker_mem_mb or 0,
+            }
+
+        # 補齊每分鐘（保證時間軸連續，無資料填 0）
+        now = datetime.now(timezone(timedelta(hours=8)))
+        data = []
+        for i in range(hours * 60, -1, -1):
+            t = now - timedelta(minutes=i)
+            key = t.strftime("%H:%M")
+            if key in row_map:
+                data.append(row_map[key])
+            else:
+                data.append({
+                    "ts": key,
+                    "ts_epoch": int(t.timestamp()),
+                    "redis_queue": 0, "db_writes": 0, "active_hospitals": 0,
+                    "scraper_errors": 0, "line_notifications": 0,
+                    "slowdown_hospitals": 0, "active_tasks": 0,
+                    "scrape_duration": 0, "worker_mem_mb": 0,
+                })
+
+        return {"metrics": data, "hours": hours}
+    except Exception as e:
+        return {"metrics": [], "error": str(e)}
+
+
 @app.get("/api/admin/nhi-stats")
 async def nhi_stats():
     """查看 NHI 資料同步統計"""

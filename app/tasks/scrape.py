@@ -9,6 +9,7 @@
 
 import asyncio
 import logging
+import random
 import redis as sync_redis
 import os
 from datetime import datetime
@@ -29,6 +30,18 @@ EMPTY_COUNT_KEY = "scrape:empty_count:{code}"
 SLOWDOWN_THRESHOLD = 3
 # 降速後的間隔（秒）：5 分鐘檢查一次有沒有恢復看診
 SLOW_INTERVAL = 300
+
+# 無訂閱用戶的醫院：降速間隔（秒）15 分鐘
+NO_USER_INTERVAL = 900
+# Redis key：快取「有訂閱用戶的醫院 set」，5 分鐘更新一次
+ACTIVE_HOSPITALS_CACHE_KEY = "scrape:active_hospitals"
+ACTIVE_HOSPITALS_TTL = 300
+
+# 夜間降頻：每 15 分鐘一次（秒）
+NIGHT_INTERVAL = 900
+# 夜間時段定義（07:00-08:00 為過渡，22:00 後為夜間）
+NIGHT_START_HOUR = 18  # 18:00 後爬蟲進入夜間模式（降頻）
+NIGHT_END_HOUR = 7
 
 # === 休診時段設定 ===
 SCRAPE_START_HOUR = 7   # 早上 7 點開始爬蟲
@@ -93,24 +106,85 @@ def _get_redis():
     return sync_redis.from_url(redis_url, decode_responses=True)
 
 
-def _should_skip(r, hospital_code: str) -> bool:
+def _is_night_mode() -> bool:
+    """判斷現在是否為夜間模式（18:00 ~ 07:00，降頻為每 15 分鐘）"""
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+    hour = datetime.now(ZoneInfo("Asia/Taipei")).hour
+    return hour >= NIGHT_START_HOUR or hour < NIGHT_END_HOUR
+
+
+def _get_active_hospital_codes(r) -> set[str]:
+    """從 Redis 快取取得「有 active 追蹤任務」的醫院代碼 set（5 分鐘更新一次）"""
+    cached = r.smembers(ACTIVE_HOSPITALS_CACHE_KEY)
+    if cached:
+        return {c.decode() if isinstance(c, bytes) else c for c in cached}
+
+    # 快取過期，從 DB 重新查詢（用同步 SQLAlchemy）
+    try:
+        import sqlalchemy
+        from sqlalchemy import create_engine
+        from app.models.tracking_task import TrackingTask, TaskStatus
+
+        sync_url = settings.database_url.replace("+aiomysql", "+pymysql").replace("+asyncpg", "+psycopg2")
+        engine = create_engine(sync_url, pool_pre_ping=True,
+                               connect_args={"init_command": "SET time_zone='+08:00'"})
+        with engine.connect() as conn:
+            rows = conn.execute(
+                sqlalchemy.select(TrackingTask.hospital_code).where(
+                    TrackingTask.status == TaskStatus.ACTIVE
+                ).distinct()
+            ).scalars().all()
+        engine.dispose()
+        codes = set(rows)
+        if codes:
+            r.sadd(ACTIVE_HOSPITALS_CACHE_KEY, *codes)
+        else:
+            # 沒有任何訂閱時設一個空佔位，避免每次都查 DB
+            r.sadd(ACTIVE_HOSPITALS_CACHE_KEY, "__empty__")
+        r.expire(ACTIVE_HOSPITALS_CACHE_KEY, ACTIVE_HOSPITALS_TTL)
+        return codes
+    except Exception as e:
+        logger.debug(f"[scrape] 取得活躍醫院失敗，跳過無用戶降頻: {e}")
+        return set()  # 查不到時保守處理：全部正常爬
+
+
+def _should_skip(r, hospital_code: str, active_codes: set[str]) -> bool:
     """
     判斷是否跳過本次抓取（接收共用 Redis client）
-    邏輯：連續 SLOWDOWN_THRESHOLD 次沒資料後，改為每 SLOW_INTERVAL 秒才抓一次
-    """
-    empty_count = int(r.get(EMPTY_COUNT_KEY.format(code=hospital_code)) or 0)
 
-    if empty_count < SLOWDOWN_THRESHOLD:
+    優先級（高→低）：
+    1. 連續空結果降速（原有邏輯）
+    2. 夜間降頻（18:00~07:00 每 15 分鐘一次）
+    3. 無訂閱用戶降頻（每 15 分鐘一次）
+    """
+    # --- 1. 連續空結果降速（原有邏輯）---
+    empty_count = int(r.get(EMPTY_COUNT_KEY.format(code=hospital_code)) or 0)
+    if empty_count >= SLOWDOWN_THRESHOLD:
+        lock_key = f"scrape:slow_lock:{hospital_code}"
+        if r.exists(lock_key):
+            return True
+        r.setex(lock_key, SLOW_INTERVAL, "1")
         return False
 
-    # 已進入降速模式，用 Redis SET NX + TTL 當作計時器
-    lock_key = f"scrape:slow_lock:{hospital_code}"
-    # 如果 lock 存在，代表還沒到下次抓取時間 → 跳過
-    if r.exists(lock_key):
-        return True
+    # --- 2. 夜間降頻 ---
+    if _is_night_mode():
+        night_key = f"scrape:night_lock:{hospital_code}"
+        if r.exists(night_key):
+            return True
+        r.setex(night_key, NIGHT_INTERVAL, "1")
+        return False
 
-    # 設定 lock，SLOW_INTERVAL 秒後過期 → 下次才會再抓
-    r.setex(lock_key, SLOW_INTERVAL, "1")
+    # --- 3. 無訂閱用戶降頻 ---
+    if active_codes and hospital_code not in active_codes:
+        nouser_key = f"scrape:nouser_lock:{hospital_code}"
+        if r.exists(nouser_key):
+            return True
+        r.setex(nouser_key, NO_USER_INTERVAL, "1")
+        return False
+
     return False
 
 
@@ -168,11 +242,13 @@ def scrape_all_hospitals(self):
 
 
 async def _scrape_all():
-    """非同步抓取所有醫院
+    """非同步抓取所有醫院（並行版）
 
-    連線管理：一個 scrape cycle 共用一個 DB engine 和一個 sync Redis client，
-    避免每家醫院都建新連線（30 家 = 原本 30 個 engine + 60 個 Redis 連線）。
+    連線管理：整個 cycle 共用一個 DB engine、一個 Redis client。
+    各醫院用 asyncio.gather() 並行抓取，Semaphore 限制最高 10 個並發，
+    避免同時對醫院網站發出過多請求。
     """
+    _start_time = asyncio.get_event_loop().time()
     cache = CacheService()
     adapters = AdapterRegistry.get_all()
 
@@ -183,60 +259,76 @@ async def _scrape_all():
     # 共用 sync Redis client — 頻率控制用
     r = _get_redis()
 
+    # 取得有訂閱用戶的醫院（用於無用戶降頻）
+    active_codes = _get_active_hospital_codes(r)
+
+    # 最多 10 個醫院同時發請求
+    sem = asyncio.Semaphore(10)
+
     try:
-        for code, adapter in adapters.items():
-            # 動態頻率控制：沒資料時自動降速
-            if _should_skip(r, code):
-                logger.debug(f"[scrape] {adapter.hospital_name} 降速中，跳過本次")
-                continue
-
-            try:
-                logger.info(f"[scrape] 開始抓取 {adapter.hospital_name}")
-                progress_list = await adapter.fetch_all_progress()
-
-                if progress_list:
-                    await cache.store_progress(progress_list)
-
-                    # 同時寫入 MySQL clinic_progress 表
-                    try:
-                        async with db_session_factory() as session:
-                            for p in progress_list:
-                                session.add(ClinicProgress(
-                                    hospital_code=p.hospital_code,
-                                    date=p.date,
-                                    session=p.session,
-                                    department=p.department,
-                                    doctor_name=p.doctor_name,
-                                    clinic_room=p.clinic_room,
-                                    current_number=p.current_number,
-                                    next_number=p.next_number,
-                                    is_current_skipped=p.is_current_skipped,
-                                    is_next_skipped=p.is_next_skipped,
-                                    fetched_at=p.fetched_at,
-                                ))
-                            await session.commit()
-                    except Exception as db_err:
-                        logger.error(f"[scrape] {adapter.hospital_name} 寫入 MySQL 失敗: {db_err}")
-
-                    logger.info(f"[scrape] {adapter.hospital_name} 完成，{len(progress_list)} 個診間")
-                    _record_result(r, code, has_data=True)
-                    # 重置失敗計數
-                    try:
-                        r.delete(f"scrape:fail_count:{code}")
-                    except Exception:
-                        pass
-                else:
-                    logger.info(f"[scrape] {adapter.hospital_name} 目前沒有看診中的診間")
-                    _record_result(r, code, has_data=False)
-
-            except Exception as e:
-                logger.error(f"[scrape] {adapter.hospital_name} 抓取失敗: {e}")
-                # 連續失敗告警
-                await _check_and_alert_failure(r, code, adapter.hospital_name, str(e))
+        tasks = [
+            _scrape_one(sem, r, code, adapter, db_session_factory, cache)
+            for code, adapter in adapters.items()
+            if not _should_skip(r, code, active_codes)
+        ]
+        await asyncio.gather(*tasks, return_exceptions=True)
     finally:
+        # 記錄本輪耗時到 Redis
+        try:
+            duration = int(asyncio.get_event_loop().time() - _start_time)
+            r.setex("monitor:scrape_duration", 120, str(duration))
+        except Exception:
+            pass
         await db_engine.dispose()
         await cache.close()
         r.close()
+
+
+async def _scrape_one(sem, r, code, adapter, db_session_factory, cache):
+    """抓取單一醫院（供 asyncio.gather 並行呼叫）"""
+    async with sem:
+        # 隨機延遲 1-3 秒，避免同 IP 規律性請求被 WAF 封鎖
+        await asyncio.sleep(random.uniform(1.0, 3.0))
+        try:
+            progress_list = await adapter.fetch_all_progress()
+
+            if progress_list:
+                await cache.store_progress(progress_list)
+
+                try:
+                    async with db_session_factory() as session:
+                        for p in progress_list:
+                            session.add(ClinicProgress(
+                                hospital_code=p.hospital_code,
+                                date=p.date,
+                                session=p.session,
+                                department=p.department,
+                                doctor_name=p.doctor_name,
+                                clinic_room=p.clinic_room,
+                                current_number=p.current_number,
+                                next_number=p.next_number,
+                                is_current_skipped=p.is_current_skipped,
+                                is_next_skipped=p.is_next_skipped,
+                                fetched_at=p.fetched_at,
+                            ))
+                        await session.commit()
+                except Exception as db_err:
+                    logger.error(f"[scrape] {adapter.hospital_name} 寫入 MySQL 失敗: {db_err}")
+
+                logger.info(f"[scrape] {adapter.hospital_name} 完成，{len(progress_list)} 個診間")
+                _record_result(r, code, has_data=True)
+                try:
+                    r.delete(f"scrape:fail_count:{code}")
+                except Exception:
+                    pass
+            else:
+                logger.debug(f"[scrape] {adapter.hospital_name} 目前沒有看診中的診間")
+                _record_result(r, code, has_data=False)
+
+        except Exception as e:
+            logger.error(f"[scrape] {adapter.hospital_name} 抓取失敗: {e}")
+            _record_result(r, code, has_data=False)  # 觸發降速機制（3 次失敗後每 5 分鐘才重試）
+            await _check_and_alert_failure(r, code, adapter.hospital_name, str(e))
 
 
 async def _check_and_alert_failure(r, hospital_code: str, hospital_name: str, error: str):
@@ -250,13 +342,13 @@ async def _check_and_alert_failure(r, hospital_code: str, hospital_name: str, er
             admin_id = settings.admin_line_user_id
             if admin_id:
                 from app.services.line_bot import LineBotService
-                bot = LineBotService()
-                await bot.push_message(admin_id, (
-                    f"⚠️ 爬蟲告警\n"
-                    f"{hospital_name} ({hospital_code})\n"
-                    f"連續失敗 {count} 次\n"
-                    f"錯誤: {error[:200]}"
-                ))
+                async with LineBotService() as bot:
+                    await bot.push_message(admin_id, (
+                        f"⚠️ 爬蟲告警\n"
+                        f"{hospital_name} ({hospital_code})\n"
+                        f"連續失敗 {count} 次\n"
+                        f"錯誤: {error[:200]}"
+                    ))
                 logger.warning(f"[scrape] 已通知管理員: {hospital_name} 連續失敗 {count} 次")
     except Exception as e:
         logger.error(f"[scrape] 告警發送失敗: {e}")

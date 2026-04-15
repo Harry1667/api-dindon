@@ -58,7 +58,7 @@ class TzuchiAdapter(BaseHospitalAdapter):
         else:
             active_sessions = ["2", "3"]
 
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0), follow_redirects=True) as client:
             # Step 1: GET 頁面取得 form state + 科別
             try:
                 resp = await client.get(self.base_url, headers=headers)
