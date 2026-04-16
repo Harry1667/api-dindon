@@ -124,7 +124,7 @@ def collect_metrics():
             metrics["active_hospitals"] = r1[1] or 0
 
             r2 = conn.execute(text(
-                "SELECT COUNT(*) FROM tracking_task WHERE status = 'active'"
+                "SELECT COUNT(*) FROM tracking_tasks WHERE status = 'active'"
             )).fetchone()
             metrics["active_tasks"] = r2[0] or 0
         engine.dispose()

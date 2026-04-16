@@ -61,7 +61,7 @@ AdapterRegistry.register(TpvghAdapter())               # 台北榮總
 AdapterRegistry.register(taipei_changgung)             # 台北長庚
 AdapterRegistry.register(CathayAdapter())              # 國泰醫院
 AdapterRegistry.register(mackay_taipei)                # 馬偕醫院 台北
-AdapterRegistry.register(ShinkongAdapter())            # 新光醫院
+# AdapterRegistry.register(ShinkongAdapter())          # 新光醫院 — AWS IP 封鎖，ConnectTimeout
 if settings.enable_wanfang_scraper:
     AdapterRegistry.register(WanfangAdapter())           # 萬芳醫院（需 ENABLE_WANFANG_SCRAPER=true）
 

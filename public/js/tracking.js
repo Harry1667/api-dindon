@@ -4,6 +4,49 @@ import { addBotMsg } from './ui.js';
 import { playDing, playDingDong } from './audio.js';
 import { showMainMenu } from './menu.js';
 
+// 取得或產生訪客 ID（儲存在 localStorage）
+function getGuestId() {
+    let id = localStorage.getItem('dd_guest_id');
+    if (!id) {
+        id = 'g_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+        localStorage.setItem('dd_guest_id', id);
+    }
+    return id;
+}
+
+// 儲存追蹤到 DB（背景呼叫，失敗不影響前端）
+async function saveTrackToDB(track) {
+    try {
+        const resp = await fetch(`${API_BASE}/api/track/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                guest_id: getGuestId(),
+                hospital_code: track.hospitalCode,
+                department: track.dept,
+                doctor_name: track.doctor,
+                clinic_room: track.room,
+                session: track.session || null,
+                user_number: track.userNumber || 0,
+            }),
+        });
+        const data = await resp.json();
+        if (data.ok) track.dbId = data.track_id;
+    } catch (_) { /* 背景記錄失敗不影響前端 */ }
+}
+
+// 更新 DB 追蹤狀態（背景呼叫）
+async function updateTrackInDB(track, reason) {
+    if (!track.dbId) return;
+    try {
+        await fetch(`${API_BASE}/api/track/${track.dbId}/stop`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ guest_id: getGuestId(), reason }),
+        });
+    } catch (_) { /* 忽略 */ }
+}
+
 export function startTracking(userNumber) {
     if (!state.pendingTrack) return;
     if (state.tracks.length >= MAX_TRACKS) {
@@ -16,6 +59,7 @@ export function startTracking(userNumber) {
     track.userNumber = userNumber;
     track.intervalId = setInterval(() => pollTracking(track), 30000);
     state.tracks.push(track);
+    saveTrackToDB(track);  // 背景存 DB
 
     state.menuState = 'tracking';
     state.menuOptions = {};
@@ -156,7 +200,7 @@ export async function pollTracking(track) {
             if (found.current_number === un) {
                 msg += `\n\n🔔 輪到您了！${un} 號正在叫號！`;
                 soundType = 'dingdong';
-                stopTrack(track);
+                stopTrack(track, 'completed');
             } else {
                 const remaining = un - found.current_number;
                 msg += `\n\n您是 ${un} 號，還剩約 ${remaining} 位`;
@@ -173,12 +217,13 @@ export async function pollTracking(track) {
     }
 }
 
-export function stopTrack(track) {
+export function stopTrack(track, reason = 'cancelled') {
     if (!track) return;
     if (track.intervalId) clearInterval(track.intervalId);
     if (track.skippedTimerId) clearInterval(track.skippedTimerId);
     const idx = state.tracks.indexOf(track);
     if (idx >= 0) state.tracks.splice(idx, 1);
+    updateTrackInDB(track, reason);  // 背景更新 DB
 }
 
 export function stopAllTracks() {

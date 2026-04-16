@@ -12,12 +12,14 @@
 """
 
 import logging
+from datetime import datetime
 
 from app.services.cache import CacheService
 from app.services.tracker import TrackerService
 from app.services.line_bot import LineBotService
 from app.models.tracking_task import NotifyMode, LIGHT_NOTIFY_POINTS
 from app.models.tracking_feedback import TrackingFeedback
+from app.models.notify_log import NotifyLog
 from app.services.track_logger import log_message as track_log, get_log, clear_log
 
 logger = logging.getLogger(__name__)
@@ -169,8 +171,8 @@ class NotifierService:
             if last_remaining is not None and last_remaining <= 0:
                 # 過號超過 30 分鐘 → 自動停止追蹤
                 from datetime import datetime, timedelta
-                if (task.updated_at and
-                        datetime.utcnow() - task.updated_at > timedelta(minutes=30)):
+                if (task.created_at and
+                        datetime.utcnow() - task.created_at > timedelta(minutes=30)):
                     message = (
                         f"ℹ️ 過號超過 30 分鐘，自動停止追蹤\n"
                         f"{header}\n"
@@ -240,6 +242,36 @@ class NotifierService:
             return True
         return False
 
+    async def _write_log(self, task, event_type: str, message: str,
+                          current_number: int | None = None,
+                          remaining: int | None = None):
+        """非同步寫入 notify_log（失敗不影響主流程）"""
+        try:
+            from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+            from app.config import settings
+            eng = create_async_engine(settings.database_url, echo=False)
+            sf = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
+            async with sf() as session:
+                log = NotifyLog(
+                    task_id=task.id,
+                    source=getattr(task, "source", "line") or "line",
+                    hospital_code=task.hospital_code,
+                    department=task.department,
+                    doctor_name=task.doctor_name,
+                    clinic_room=task.clinic_room,
+                    user_number=task.user_number,
+                    current_number=current_number,
+                    remaining=remaining,
+                    event_type=event_type,
+                    message_preview=message[:200],
+                    created_at=datetime.utcnow(),
+                )
+                session.add(log)
+                await session.commit()
+            await eng.dispose()
+        except Exception as e:
+            logger.warning(f"[notifier] notify_log 寫入失敗（非關鍵）: {e}")
+
     async def _send(self, task, line_user_id: str, message: str, remaining: int):
         """發送通知，更新剩餘數，但不結束追蹤
 
@@ -247,21 +279,30 @@ class NotifierService:
         下次 check cycle 會重新觸發通知。
         """
         track_log(task.id, "notify", message[:300])
-        try:
-            await self.line_bot.push_message(line_user_id, message)
+        if line_user_id:
             try:
-                await self.cache.redis.incr("monitor:line_notify_count")
-            except Exception:
-                pass
-        except Exception as e:
-            logger.error(f"[notifier] 推播失敗 task={task.id}: {e}")
-            return  # 推播失敗，不更新 DB，下次重試
+                await self.line_bot.push_message(line_user_id, message)
+                try:
+                    await self.cache.redis.incr("monitor:line_notify_count")
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.error(f"[notifier] 推播失敗 task={task.id}: {e}")
+                return  # 推播失敗，不更新 DB，下次重試
         try:
             await self.tracker.update_last_remaining(task.id, remaining)
         except Exception as e:
             logger.error(f"[notifier] 更新剩餘數失敗 task={task.id}: {e}")
+        # 判斷 event_type
+        if remaining == 0:
+            evt = "passed"
+        elif remaining <= (task.threshold or 3):
+            evt = "notify"
+        else:
+            evt = "notify"
+        await self._write_log(task, evt, message, remaining=remaining)
         logger.info(
-            f"[notifier] 已通知 user={line_user_id} task={task.id} remaining={remaining}"
+            f"[notifier] 已通知 source={getattr(task,'source','?')} task={task.id} remaining={remaining}"
         )
 
     async def _send_and_finish(self, task, line_user_id: str, message: str, end_reason: str = "arrived"):
@@ -271,38 +312,42 @@ class NotifierService:
         下次 check cycle 會重新嘗試通知。
         """
         track_log(task.id, "notify", message[:300])
-        # Step 1: 先推播，失敗就不改 DB
-        try:
-            await self.line_bot.push_message(line_user_id, message)
+        # Step 1: 有 LINE userId 才推播，否則直接標記完成
+        if line_user_id:
             try:
-                await self.cache.redis.incr("monitor:line_notify_count")
-            except Exception:
-                pass
-        except Exception as e:
-            logger.error(f"[notifier] 推播失敗 task={task.id}: {e}")
-            return  # 推播失敗，不標記完成，下次重試
-        # Step 2: 推播成功，標記完成
+                await self.line_bot.push_message(line_user_id, message)
+                try:
+                    await self.cache.redis.incr("monitor:line_notify_count")
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.error(f"[notifier] 推播失敗 task={task.id}: {e}")
+                return  # 推播失敗，不標記完成，下次重試
+        # Step 2: 推播成功（或無需推播），標記完成
         try:
             await self.tracker.mark_notified(task.id)
         except Exception as e:
             logger.error(f"[notifier] 標記完成失敗 task={task.id}: {e}")
-        # Step 3: 建立回饋（非關鍵，失敗不影響主流程）
-        feedback_id = await self._create_feedback(task, line_user_id, message, end_reason)
-        if feedback_id:
-            try:
-                await self.line_bot.push_message(line_user_id, (
-                    f"📋 追蹤結束，通知是否正確？\n\n"
-                    f"  0 — ✅ 正確\n"
-                    f"  1 — ❌ 有誤\n\n"
-                    f"（回覆 0 或 1，幫助我們改善）"
-                ))
-                from demo_chat import _conversations
-                _conversations[line_user_id] = {
-                    "state": "waiting_feedback",
-                    "feedback_id": feedback_id,
-                }
-            except Exception as e:
-                logger.error(f"[notifier] 回饋推播失敗 task={task.id}: {e}")
+        await self._write_log(task, end_reason, message)
+        # Step 3: 建立回饋（LINE 追蹤才有；非關鍵，失敗不影響主流程）
+        feedback_id = None
+        if line_user_id:
+            feedback_id = await self._create_feedback(task, line_user_id, message, end_reason)
+            if feedback_id:
+                try:
+                    await self.line_bot.push_message(line_user_id, (
+                        f"📋 追蹤結束，通知是否正確？\n\n"
+                        f"  0 — ✅ 正確\n"
+                        f"  1 — ❌ 有誤\n\n"
+                        f"（回覆 0 或 1，幫助我們改善）"
+                    ))
+                    from demo_chat import _conversations
+                    _conversations[line_user_id] = {
+                        "state": "waiting_feedback",
+                        "feedback_id": feedback_id,
+                    }
+                except Exception as e:
+                    logger.error(f"[notifier] 回饋推播失敗 task={task.id}: {e}")
         logger.info(f"[notifier] 已通知(結束) task={task.id} reason={end_reason} feedback={feedback_id}")
 
     async def _create_feedback(self, task, line_user_id: str, message: str, end_reason: str) -> int | None:

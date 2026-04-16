@@ -78,15 +78,31 @@ class TrackerService:
             )
             return list(result.scalars().all())
 
-    async def get_all_active_tasks(self) -> list[tuple[TrackingTask, str]]:
-        """取得所有活躍追蹤任務（含 LINE user ID），用於 Celery 通知比對"""
+    async def get_all_active_tasks(self) -> list[tuple[TrackingTask, str | None]]:
+        """取得所有活躍追蹤任務（所有來源），用於 Celery 通知比對
+
+        回傳 (task, line_user_id)，web/guest 追蹤的 line_user_id 為 None
+        """
         async with self._session_factory() as session:
-            result = await session.execute(
+            # LINE 追蹤：JOIN User 取得 line_user_id
+            line_result = await session.execute(
                 select(TrackingTask, User.line_user_id)
                 .join(User, TrackingTask.user_id == User.id)
                 .where(TrackingTask.status == TaskStatus.ACTIVE)
             )
-            return [(row[0], row[1]) for row in result.all()]
+            line_tasks = [(row[0], row[1]) for row in line_result.all()]
+
+            # Web/其他來源：user_id 為 NULL
+            web_result = await session.execute(
+                select(TrackingTask)
+                .where(
+                    TrackingTask.status == TaskStatus.ACTIVE,
+                    TrackingTask.user_id.is_(None),
+                )
+            )
+            web_tasks = [(row[0], None) for row in web_result.all()]
+
+            return line_tasks + web_tasks
 
     async def update_last_remaining(self, task_id: int, remaining: int):
         """更新上次通知時的剩餘人數"""

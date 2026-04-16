@@ -30,7 +30,9 @@ class TrackingTask(Base):
     __tablename__ = "tracking_tasks"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    source: Mapped[str] = mapped_column(String(10), default="line", comment="來源: line/web")
+    guest_id: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="網頁訪客 ID（localStorage UUID）")
     hospital_code: Mapped[str] = mapped_column(String(50), nullable=False, comment="醫院代碼")
     department: Mapped[str] = mapped_column(String(100), nullable=False, comment="科別")
     doctor_name: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="醫師姓名")

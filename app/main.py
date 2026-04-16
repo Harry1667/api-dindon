@@ -19,6 +19,7 @@ from app.api.test_harness import router as test_router
 from app.api.live_test import router as live_test_router
 from app.api.liff import router as liff_router
 from app.api.push import router as push_router
+from app.api.track import router as track_router
 from app.models.database import engine, Base
 
 # 確保所有 Model 都被 import，create_all 才能建立資料表
@@ -128,6 +129,7 @@ app.include_router(test_router)
 app.include_router(live_test_router)
 app.include_router(liff_router)
 app.include_router(push_router)
+app.include_router(track_router)
 
 # === PWA 靜態資源 ===
 # aaPanel nginx 對 .json/.js/.png 做 try_files 後 deny,所以全部用無副檔名路徑

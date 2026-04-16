@@ -156,6 +156,106 @@ async def api_dashboard(admin_token: str | None = Cookie(None)):
 
 
 # ============================================================
+# 追蹤任務管理 API（分類）
+# ============================================================
+
+@router.get("/api/tracks")
+async def api_tracks(
+    admin_token: str | None = Cookie(None),
+    status: str | None = None,
+    source: str | None = None,
+    limit: int = 200,
+):
+    """取得追蹤任務清單，支援依狀態/來源過濾"""
+    if not _check_auth(admin_token):
+        return JSONResponse({"error": "未登入"}, status_code=401)
+
+    from sqlalchemy import select
+    from app.models.database import async_session
+    from app.models.tracking_task import TrackingTask
+
+    async with async_session() as session:
+        q = select(TrackingTask).order_by(TrackingTask.created_at.desc())
+        if status:
+            q = q.where(TrackingTask.status == status)
+        if source:
+            q = q.where(TrackingTask.source == source)
+        q = q.limit(limit)
+        result = await session.execute(q)
+        tasks = result.scalars().all()
+
+    return [
+        {
+            "id": t.id,
+            "source": getattr(t, "source", "line"),
+            "guest_id": (t.guest_id[:8] + "..." if getattr(t, "guest_id", None) else None),
+            "user_id": t.user_id,
+            "hospital_code": t.hospital_code,
+            "department": t.department,
+            "doctor_name": t.doctor_name,
+            "clinic_room": t.clinic_room,
+            "user_number": t.user_number,
+            "status": t.status.value if hasattr(t.status, "value") else t.status,
+            "notify_mode": t.notify_mode,
+            "created_at": t.created_at.strftime("%m/%d %H:%M") if t.created_at else "",
+        }
+        for t in tasks
+    ]
+
+
+@router.get("/api/tracks/summary")
+async def api_tracks_summary(admin_token: str | None = Cookie(None)):
+    """追蹤任務分類統計"""
+    if not _check_auth(admin_token):
+        return JSONResponse({"error": "未登入"}, status_code=401)
+
+    from sqlalchemy import select, func
+    from app.models.database import async_session
+    from app.models.tracking_task import TrackingTask
+
+    async with async_session() as session:
+        # 依狀態分類
+        by_status = (await session.execute(
+            select(TrackingTask.status, func.count(TrackingTask.id))
+            .group_by(TrackingTask.status)
+        )).all()
+
+        # 依來源分類
+        by_source = (await session.execute(
+            select(TrackingTask.source, func.count(TrackingTask.id))
+            .group_by(TrackingTask.source)
+        )).all()
+
+        # 活躍追蹤依醫院排行
+        by_hospital = (await session.execute(
+            select(TrackingTask.hospital_code, func.count(TrackingTask.id).label("cnt"))
+            .where(TrackingTask.status == "active")
+            .group_by(TrackingTask.hospital_code)
+            .order_by(func.count(TrackingTask.id).desc())
+            .limit(10)
+        )).all()
+
+        # 活躍追蹤依科別排行
+        by_dept = (await session.execute(
+            select(TrackingTask.department, func.count(TrackingTask.id).label("cnt"))
+            .where(TrackingTask.status == "active")
+            .group_by(TrackingTask.department)
+            .order_by(func.count(TrackingTask.id).desc())
+            .limit(10)
+        )).all()
+
+    return {
+        "by_status": {
+            row[0].value if hasattr(row[0], "value") else row[0]: row[1]
+            for row in by_status
+        },
+        "by_source": {(row[0] or "line"): row[1] for row in by_source},
+        "top_hospitals": [{"code": r[0], "count": r[1]} for r in by_hospital],
+        "top_depts": [{"dept": r[0], "count": r[1]} for r in by_dept],
+    }
+
+
+# ============================================================
 # 追蹤回饋 API
 # ============================================================
 
@@ -485,6 +585,194 @@ async def api_doctors(admin_token: str | None = Cookie(None), hospital_code: str
 
 
 # ============================================================
+# 即時詳情：從 Redis cache 讀取目前所有診間狀態
+# ============================================================
+
+@router.get("/api/live/clinics")
+async def api_live_clinics(admin_token: str | None = Cookie(None)):
+    """讀取 Redis cache 中所有醫院的即時看診進度"""
+    if not _check_auth(admin_token):
+        return JSONResponse({"error": "未登入"}, status_code=401)
+
+    from app.services.cache import CacheService
+    from app.scrapers.registry import AdapterRegistry
+
+    cache = CacheService()
+    try:
+        # 取得所有 cache key（格式：progress:{hospital_code}）
+        all_codes = AdapterRegistry.get_all_codes()
+        result = []
+        for code in sorted(all_codes):
+            adapter = AdapterRegistry.get(code)
+            hosp_name = adapter.hospital_name if adapter else code
+            entries = await cache.get_all_progress(code)
+            for e in entries:
+                result.append({
+                    "hospital_code": code,
+                    "hospital_name": hosp_name,
+                    "department": e.department or "",
+                    "clinic_room": e.clinic_room or "",
+                    "doctor_name": e.doctor_name or "",
+                    "session": e.session or "",
+                    "current_number": e.current_number,
+                    "next_number": e.next_number,
+                    "is_current_skipped": getattr(e, "is_current_skipped", False),
+                    "fetched_at": e.fetched_at.strftime("%H:%M:%S") if e.fetched_at else "",
+                })
+        return {"total": len(result), "clinics": result}
+    finally:
+        await cache.redis.aclose()
+
+
+# ============================================================
+# 測試用假追蹤用戶
+# ============================================================
+
+@router.post("/api/test/fake/seed")
+async def api_test_seed(admin_token: str | None = Cookie(None)):
+    """建立假追蹤任務：對所有現有診間設一個 user_number=35 的 test task"""
+    if not _check_auth(admin_token):
+        return JSONResponse({"error": "未登入"}, status_code=401)
+
+    from sqlalchemy import select
+    from app.models.database import async_session
+    from app.models.tracking_task import TrackingTask, TaskStatus, NotifyMode
+    from app.services.cache import CacheService
+    from app.scrapers.registry import AdapterRegistry
+
+    cache = CacheService()
+    created = 0
+    skipped = 0
+
+    try:
+        codes = list(AdapterRegistry.get_all().keys())
+        all_progress = []
+        for code in codes:
+            items = await cache.get_all_progress(code)
+            all_progress.extend(items)
+        await cache.close()
+
+        if not all_progress:
+            return JSONResponse({"ok": False, "error": "Redis 無診間資料，請等爬蟲跑完一輪"})
+
+        async with async_session() as session:
+            # 查已有的 test 任務，避免重複
+            existing = await session.execute(
+                select(TrackingTask.hospital_code, TrackingTask.clinic_room, TrackingTask.session)
+                .where(TrackingTask.source == "test", TrackingTask.status == TaskStatus.ACTIVE)
+            )
+            existing_set = {(r[0], r[1], r[2]) for r in existing.all()}
+
+            for p in all_progress:
+                key = (p.hospital_code, p.clinic_room, p.session)
+                if key in existing_set:
+                    skipped += 1
+                    continue
+                # user_number = 35，若目前號碼已超過 35，設為 current+10 避免立刻觸發
+                target_num = 35 if p.current_number < 35 else p.current_number + 10
+                import hashlib
+                room_hash = hashlib.md5(f"{p.hospital_code}_{p.clinic_room}_{p.session}".encode()).hexdigest()[:16]
+                task = TrackingTask(
+                    user_id=None,
+                    hospital_code=p.hospital_code,
+                    department=p.department,
+                    doctor_name=p.doctor_name,
+                    clinic_room=p.clinic_room,
+                    session=p.session,
+                    user_number=target_num,
+                    threshold=5,
+                    notify_mode=NotifyMode.LIGHT.value,
+                    source="test",
+                    guest_id=f"test_{room_hash}",
+                    status=TaskStatus.ACTIVE,
+                )
+                session.add(task)
+                existing_set.add(key)
+                created += 1
+
+            await session.commit()
+
+        return {"ok": True, "created": created, "skipped": skipped, "total_progress": len(all_progress)}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.delete("/api/test/fake/seed")
+async def api_test_clear(admin_token: str | None = Cookie(None)):
+    """清除所有 source=test 的追蹤任務"""
+    if not _check_auth(admin_token):
+        return JSONResponse({"error": "未登入"}, status_code=401)
+
+    from sqlalchemy import update
+    from app.models.database import async_session
+    from app.models.tracking_task import TrackingTask, TaskStatus
+
+    async with async_session() as session:
+        result = await session.execute(
+            update(TrackingTask)
+            .where(TrackingTask.source == "test")
+            .values(status=TaskStatus.CANCELLED)
+        )
+        await session.commit()
+
+    return {"ok": True, "cancelled": result.rowcount}
+
+
+@router.get("/api/test/fake/status")
+async def api_test_fake_status(admin_token: str | None = Cookie(None)):
+    """查看測試任務統計"""
+    if not _check_auth(admin_token):
+        return JSONResponse({"error": "未登入"}, status_code=401)
+
+    from sqlalchemy import select, func
+    from app.models.database import async_session
+    from app.models.tracking_task import TrackingTask, TaskStatus
+    from app.models.notification import Notification
+
+    async with async_session() as session:
+        # 各狀態數量
+        counts = await session.execute(
+            select(TrackingTask.status, func.count().label("cnt"))
+            .where(TrackingTask.source == "test")
+            .group_by(TrackingTask.status)
+        )
+        status_counts = {r[0]: r[1] for r in counts.all()}
+
+        # 已通知的樣本
+        notified_tasks = await session.execute(
+            select(TrackingTask)
+            .where(TrackingTask.source == "test", TrackingTask.status == TaskStatus.NOTIFIED)
+            .order_by(TrackingTask.notified_at.desc())
+            .limit(20)
+        )
+        notified = notified_tasks.scalars().all()
+
+        # 通知記錄數
+        notif_count = await session.execute(
+            select(func.count(Notification.id))
+            .join(TrackingTask, Notification.tracking_task_id == TrackingTask.id)
+            .where(TrackingTask.source == "test")
+        )
+
+    return {
+        "status_counts": status_counts,
+        "notification_count": notif_count.scalar() or 0,
+        "notified_sample": [
+            {
+                "id": t.id,
+                "hospital_code": t.hospital_code,
+                "department": t.department,
+                "clinic_room": t.clinic_room,
+                "session": t.session,
+                "user_number": t.user_number,
+                "notified_at": t.notified_at.isoformat() if t.notified_at else None,
+            }
+            for t in notified
+        ],
+    }
+
+
+# ============================================================
 # 頁面
 # ============================================================
 
@@ -615,11 +903,13 @@ th.sortable span { font-size:10px; }
   <div class="right">
     <button id="tabStats" class="active" onclick="switchTab('stats')">統計總覽</button>
     <button id="tabHospitals" onclick="switchTab('hospitals')">醫院管理</button>
+    <button id="tabTracks" onclick="switchTab('tracks')">追蹤管理</button>
     <button id="tabShortcuts" onclick="switchTab('shortcuts')">快捷指令</button>
     <button id="tabFeedback" onclick="switchTab('feedback')">回饋記錄</button>
     <button id="tabTest" onclick="switchTab('test')">系統測試</button>
     <button id="tabLive" onclick="switchTab('live')">即時追蹤測試</button>
     <button id="tabMonitor" onclick="switchTab('monitor')">負載監控</button>
+    <button id="tabClinicLive" onclick="switchTab('cliniclive')">即時詳情</button>
     <button class="logout" onclick="doLogout()">登出</button>
   </div>
 </div>
@@ -660,6 +950,46 @@ th.sortable span { font-size:10px; }
         </tr>
       </thead>
       <tbody id="hospitalBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 追蹤管理頁 -->
+<div class="container hidden" id="pageTracks">
+  <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;flex-wrap:wrap;">
+    <h2 style="font-size:16px;margin:0;">追蹤管理</h2>
+    <select id="trackFilterStatus" onchange="loadTracks()" style="padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;">
+      <option value="">全部狀態</option>
+      <option value="active">追蹤中</option>
+      <option value="completed">已完成</option>
+      <option value="cancelled">已取消</option>
+      <option value="notified">已通知</option>
+    </select>
+    <select id="trackFilterSource" onchange="loadTracks()" style="padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;">
+      <option value="">全部來源</option>
+      <option value="web">網頁</option>
+      <option value="line">LINE</option>
+    </select>
+    <button onclick="loadTracks()" style="padding:6px 14px;background:#4a90d9;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;">重新整理</button>
+  </div>
+  <!-- 分類統計卡片 -->
+  <div id="trackSummaryCards" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;"></div>
+  <!-- 追蹤列表 -->
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>ID</th>
+        <th>來源</th>
+        <th>訪客/用戶</th>
+        <th>醫院</th>
+        <th>科別</th>
+        <th>醫生</th>
+        <th>診間</th>
+        <th>號碼</th>
+        <th>狀態</th>
+        <th>建立時間</th>
+      </tr></thead>
+      <tbody id="tracksBody"></tbody>
     </table>
   </div>
 </div>
@@ -875,6 +1205,28 @@ th.sortable span { font-size:10px; }
 
   <!-- 歷史 -->
   <div id="testHistory" style="margin-top:24px;"></div>
+
+  <!-- 假追蹤用戶壓力測試 -->
+  <div style="margin-top:24px;border-top:2px solid #e0e0e0;padding-top:20px;">
+    <h3 style="font-size:15px;margin-bottom:12px;">🤖 假追蹤用戶（全診間壓力測試）</h3>
+    <p style="font-size:13px;color:#666;margin-bottom:12px;">
+      對所有現有診間各建一筆假追蹤任務（號碼設 35），走完整 pipeline：爬蟲→notifier→DB 記錄。無 LINE 帳號，不會發訊息。
+    </p>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;">
+      <button onclick="seedFakeUsers()" style="padding:8px 20px;border:none;border-radius:6px;background:#e67e22;color:#fff;cursor:pointer;font-size:14px;font-weight:600;">
+        ▶ 建立假用戶
+      </button>
+      <button onclick="clearFakeUsers()" style="padding:8px 20px;border:1px solid #e74c3c;border-radius:6px;background:#fff;color:#e74c3c;cursor:pointer;font-size:14px;">
+        🗑 清除假用戶
+      </button>
+      <button onclick="loadFakeStatus()" style="padding:8px 16px;border:1px solid #888;border-radius:6px;background:#fff;cursor:pointer;font-size:13px;">
+        🔄 更新狀態
+      </button>
+      <span id="fakeMsg" style="font-size:13px;color:#27ae60;"></span>
+    </div>
+    <div id="fakeStatus" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:16px;"></div>
+    <div id="fakeNotified" style="font-size:13px;"></div>
+  </div>
 </div>
 
 <!-- 快捷指令頁 -->
@@ -903,6 +1255,40 @@ th.sortable span { font-size:10px; }
   <div style="margin-top:12px;display:flex;gap:8px;">
     <button class="btn" onclick="saveShortcuts()" style="padding:8px 24px;border:none;border-radius:6px;background:#27ae60;color:#fff;cursor:pointer;font-size:14px;">儲存變更</button>
     <span id="shortcutMsg" style="font-size:13px;color:#27ae60;line-height:36px;"></span>
+  </div>
+</div>
+
+<!-- 即時詳情頁 -->
+<div class="container hidden" id="pageClinicLive">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+    <h2 style="font-size:16px;margin:0;">即時診間詳情</h2>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <span id="clinicLiveCount" style="font-size:13px;color:#888;"></span>
+      <input id="clinicLiveFilter" type="text" placeholder="搜尋醫院/科別/醫生…" style="padding:5px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;width:180px;" oninput="renderClinicLive()">
+      <select id="clinicLiveSession" onchange="renderClinicLive()" style="padding:5px 8px;border:1px solid #ddd;border-radius:6px;font-size:13px;">
+        <option value="">全部時段</option>
+        <option value="上午診">上午診</option>
+        <option value="下午診">下午診</option>
+        <option value="夜診">夜診</option>
+      </select>
+      <button onclick="loadClinicLive()" style="padding:6px 14px;border:1px solid #4a90d9;border-radius:6px;background:#4a90d9;color:#fff;cursor:pointer;font-size:13px;">重新整理</button>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table id="clinicLiveTable">
+      <thead><tr>
+        <th style="width:100px">醫院</th>
+        <th style="width:80px">時段</th>
+        <th style="width:100px">科別</th>
+        <th style="width:70px">診室</th>
+        <th style="width:100px">醫生</th>
+        <th style="width:60px;text-align:center">目前號</th>
+        <th style="width:60px;text-align:center">下一號</th>
+        <th style="width:60px;text-align:center">過號</th>
+        <th style="width:70px">更新時間</th>
+      </tr></thead>
+      <tbody id="clinicLiveBody"></tbody>
+    </table>
   </div>
 </div>
 
@@ -944,17 +1330,19 @@ async function doLogout() {
 // ===== 切頁 =====
 function switchTab(tab) {
   currentTab = tab;
-  for (const p of ['Stats','Hospitals','Shortcuts','Feedback','Test','Live','Monitor']) {
+  for (const p of ['Stats','Hospitals','Tracks','Shortcuts','Feedback','Test','Live','Monitor','ClinicLive']) {
     document.getElementById('page'+p).classList.toggle('hidden', tab !== p.toLowerCase());
     document.getElementById('tab'+p).classList.toggle('active', tab === p.toLowerCase());
   }
   if (tab === 'stats') loadStats();
   if (tab === 'hospitals') loadHospitals();
+  if (tab === 'tracks') { loadTrackSummary(); loadTracks(); }
   if (tab === 'shortcuts') loadShortcuts();
   if (tab === 'feedback') loadFeedback();
-  if (tab === 'test') loadTestEnv();
+  if (tab === 'test') { loadTestEnv(); loadFakeStatus(); }
   if (tab === 'live') checkLiveTest();
   if (tab === 'monitor') loadMonitor();
+  if (tab === 'cliniclive') loadClinicLive();
 }
 
 // ===== 統計 =====
@@ -974,6 +1362,55 @@ async function loadStats() {
     document.getElementById('statCards').innerHTML = cards.map(c =>
       `<div class="stat-card"><div class="num">${c.num}</div><div class="label">${c.label}</div></div>`
     ).join('');
+  } catch(e) {}
+}
+
+// ===== 追蹤管理 =====
+const STATUS_LABELS = { active:'🟢 追蹤中', completed:'✅ 已完成', cancelled:'🚫 已取消', notified:'🔔 已通知' };
+const SOURCE_LABELS = { web:'🌐 網頁', line:'💬 LINE' };
+
+async function loadTrackSummary() {
+  try {
+    const r = await fetch('/admin/api/tracks/summary');
+    if (!r.ok) return;
+    const d = await r.json();
+    const statusColors = { active:'#e3f2fd', completed:'#e8f5e9', cancelled:'#ffebee', notified:'#fff3e0' };
+    let cards = '';
+    for (const [k,v] of Object.entries(d.by_status || {})) {
+      cards += `<div class="stat-card" style="background:${statusColors[k]||'#f5f5f5'};min-width:100px">
+        <div class="num">${v}</div><div class="label">${STATUS_LABELS[k]||k}</div></div>`;
+    }
+    for (const [k,v] of Object.entries(d.by_source || {})) {
+      cards += `<div class="stat-card" style="min-width:80px">
+        <div class="num">${v}</div><div class="label">${SOURCE_LABELS[k]||k}</div></div>`;
+    }
+    document.getElementById('trackSummaryCards').innerHTML = cards;
+  } catch(e) {}
+}
+
+async function loadTracks() {
+  const status = document.getElementById('trackFilterStatus').value;
+  const source = document.getElementById('trackFilterSource').value;
+  let url = '/admin/api/tracks?limit=200';
+  if (status) url += '&status=' + status;
+  if (source) url += '&source=' + source;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return;
+    const tracks = await r.json();
+    document.getElementById('tracksBody').innerHTML = tracks.map(t => `
+      <tr>
+        <td>${t.id}</td>
+        <td>${SOURCE_LABELS[t.source]||t.source}</td>
+        <td style="font-size:11px;color:#888">${t.guest_id || ('UID:'+t.user_id) || '-'}</td>
+        <td>${t.hospital_code}</td>
+        <td>${t.department}</td>
+        <td>${t.doctor_name||'-'}</td>
+        <td>${t.clinic_room||'-'}</td>
+        <td>${t.user_number||'-'}</td>
+        <td>${STATUS_LABELS[t.status]||t.status}</td>
+        <td>${t.created_at}</td>
+      </tr>`).join('');
   } catch(e) {}
 }
 
@@ -1316,13 +1753,14 @@ async function loadTestEnv() {
     const d = await r.json();
     _testStatusData = d;
 
+    const hospitals = d.hospitals || [];
     document.getElementById('testEnv').innerHTML =
-      `🏥 有資料：${d.hospitals.length} 家，共 ${d.hospitals.reduce((a,h)=>a+h.rooms,0)} 個診間<br>` +
-      `📋 可產生劇本：${d.total_scenarios} 個`;
+      `🏥 有資料：${hospitals.length} 家，共 ${hospitals.reduce((a,h)=>a+h.rooms,0)} 個診間<br>` +
+      `📋 可產生劇本：${d.total_scenarios || 0} 個`;
 
     // 醫院勾選
     const list = document.getElementById('testHospitalList');
-    list.innerHTML = d.hospitals.map(h =>
+    list.innerHTML = hospitals.map(h =>
       `<label style="background:#fff;padding:2px 8px;border-radius:4px;border:1px solid #ddd;cursor:pointer;">` +
       `<input type="checkbox" class="test-hosp-cb" value="${h.name}" checked> ${h.name}(${h.rooms})</label>`
     ).join('');
@@ -1385,8 +1823,8 @@ async function runTest() {
   // 收集參數
   const selectedHospitals = [...document.querySelectorAll('.test-hosp-cb:checked')].map(cb => cb.value);
   const selectedTypes = [...document.querySelectorAll('#testScenarioTypes input:checked')].map(cb => cb.value);
-  const usersPerScenario = parseInt(document.getElementById('testUsersPerScenario').value);
-  const maxConcurrent = parseInt(document.getElementById('testMaxConcurrent').value);
+  const usersPerScenario = parseInt((document.getElementById('testUsersPerScenario') || document.getElementById('testRandomCount') || {value:'20'}).value);
+  const maxConcurrent = parseInt((document.getElementById('testMaxConcurrent') || {value:'50'}).value);
 
   try {
     const r = await fetch('/admin/api/test/run', {
@@ -1510,6 +1948,82 @@ async function checkScheduleStatus() {
       document.getElementById('scheduleStatus').textContent =
         `⏰ 排程中：${d.start_time} ~ ${d.end_time}，每 ${d.interval}分，已跑 ${d.runs_done} 次`;
       document.getElementById('btnCancelSchedule').style.display = 'inline';
+    }
+  } catch(e) {}
+}
+
+// ===== 假追蹤用戶 =====
+async function seedFakeUsers() {
+  document.getElementById('fakeMsg').textContent = '建立中...';
+  try {
+    const r = await fetch('/admin/api/test/fake/seed', {method:'POST'});
+    const d = await r.json();
+    if (d.ok) {
+      document.getElementById('fakeMsg').textContent = `✅ 建立 ${d.created} 筆，略過重複 ${d.skipped} 筆（共 ${d.total_progress} 個診間）`;
+      loadFakeStatus();
+    } else {
+      document.getElementById('fakeMsg').style.color='#e74c3c';
+      document.getElementById('fakeMsg').textContent = '❌ ' + (d.error || '失敗');
+    }
+  } catch(e) { document.getElementById('fakeMsg').textContent = '❌ 連線失敗'; }
+}
+
+async function clearFakeUsers() {
+  if (!confirm('確定清除所有假追蹤任務？')) return;
+  try {
+    const r = await fetch('/admin/api/test/fake/seed', {method:'DELETE'});
+    const d = await r.json();
+    document.getElementById('fakeMsg').style.color='#888';
+    document.getElementById('fakeMsg').textContent = `已取消 ${d.cancelled} 筆假任務`;
+    document.getElementById('fakeStatus').innerHTML = '';
+    document.getElementById('fakeNotified').innerHTML = '';
+  } catch(e) {}
+}
+
+async function loadFakeStatus() {
+  try {
+    const r = await fetch('/admin/api/test/fake/status');
+    if (!r.ok) return;
+    const d = await r.json();
+    const sc = d.status_counts || {};
+    const labels = { active:'🟢 追蹤中', notified:'🔔 已通知', cancelled:'🚫 已取消', completed:'✅ 完成' };
+    const colors = { active:'#27ae60', notified:'#e67e22', cancelled:'#999', completed:'#2980b9' };
+    document.getElementById('fakeStatus').innerHTML = [
+      ...Object.entries(sc).map(([s,c]) =>
+        `<div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:12px;text-align:center;">
+          <div style="font-size:24px;font-weight:700;color:${colors[s]||'#333'}">${c}</div>
+          <div style="font-size:12px;color:#666;margin-top:4px;">${labels[s]||s}</div>
+        </div>`
+      ),
+      `<div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:12px;text-align:center;">
+        <div style="font-size:24px;font-weight:700;color:#8e44ad">${d.notification_count}</div>
+        <div style="font-size:12px;color:#666;margin-top:4px;">📨 通知記錄</div>
+      </div>`,
+    ].join('');
+
+    if (d.notified_sample && d.notified_sample.length > 0) {
+      document.getElementById('fakeNotified').innerHTML =
+        `<b style="font-size:13px;">已通知樣本（最新 20 筆）</b>
+        <table style="width:100%;margin-top:8px;font-size:12px;border-collapse:collapse;">
+          <thead><tr style="background:#f0f2f5;">
+            <th style="padding:6px;text-align:left;">醫院</th>
+            <th style="padding:6px;text-align:left;">診間</th>
+            <th style="padding:6px;text-align:left;">診別</th>
+            <th style="padding:6px;text-align:center;">追蹤號</th>
+            <th style="padding:6px;text-align:left;">通知時間</th>
+          </tr></thead><tbody>` +
+        d.notified_sample.map(t =>
+          `<tr style="border-bottom:1px solid #eee;">
+            <td style="padding:5px 6px;">${t.hospital_code}</td>
+            <td style="padding:5px 6px;">${t.clinic_room}</td>
+            <td style="padding:5px 6px;">${t.session||'-'}</td>
+            <td style="padding:5px 6px;text-align:center;">${t.user_number}</td>
+            <td style="padding:5px 6px;">${t.notified_at ? t.notified_at.replace('T',' ').slice(0,19) : '-'}</td>
+          </tr>`
+        ).join('') +
+        `</tbody></table>`;
+    } else {
+      document.getElementById('fakeNotified').innerHTML = '<span style="font-size:13px;color:#999;">尚無已通知的假任務</span>';
     }
   } catch(e) {}
 }
@@ -1805,6 +2319,50 @@ async function loadMonitor() {
   } catch(e) {
     document.getElementById('monitorStatus').textContent = '載入失敗：' + e.message;
   }
+}
+
+// ===== 即時詳情 =====
+let _clinicLiveData = [];
+
+async function loadClinicLive() {
+  document.getElementById('clinicLiveCount').textContent = '載入中…';
+  try {
+    const r = await fetch('/admin/api/live/clinics');
+    if (r.status === 401) { location.reload(); return; }
+    const d = await r.json();
+    _clinicLiveData = d.clinics || [];
+    document.getElementById('clinicLiveCount').textContent = `共 ${d.total} 個診間`;
+    renderClinicLive();
+  } catch(e) {
+    document.getElementById('clinicLiveCount').textContent = '載入失敗：' + e.message;
+  }
+}
+
+function renderClinicLive() {
+  const kw = (document.getElementById('clinicLiveFilter').value || '').toLowerCase();
+  const sess = document.getElementById('clinicLiveSession').value;
+  const tbody = document.getElementById('clinicLiveBody');
+  let rows = _clinicLiveData;
+  if (kw) rows = rows.filter(r =>
+    (r.hospital_name||'').toLowerCase().includes(kw) ||
+    (r.department||'').toLowerCase().includes(kw) ||
+    (r.doctor_name||'').toLowerCase().includes(kw) ||
+    (r.clinic_room||'').toLowerCase().includes(kw)
+  );
+  if (sess) rows = rows.filter(r => r.session === sess);
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#888;padding:20px;">無資料</td></tr>'; return; }
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td style="font-size:12px">${r.hospital_name}</td>
+      <td style="font-size:12px;color:#666">${r.session}</td>
+      <td style="font-size:12px">${r.department}</td>
+      <td style="font-size:12px;color:#888">${r.clinic_room}</td>
+      <td style="font-size:12px">${r.doctor_name}</td>
+      <td style="text-align:center;font-weight:600;font-size:15px;color:#2c3e50">${r.current_number ?? '-'}</td>
+      <td style="text-align:center;font-size:14px;color:#4a90d9">${r.next_number ?? '-'}</td>
+      <td style="text-align:center;font-size:13px">${r.is_current_skipped ? '<span style="color:#e74c3c">⚠️過號</span>' : ''}</td>
+      <td style="font-size:11px;color:#aaa">${r.fetched_at}</td>
+    </tr>`).join('');
 }
 </script>
 </body>

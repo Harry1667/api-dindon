@@ -17,6 +17,8 @@ from app.models.database import Base
 # 確保所有 model 被 import
 from app.models import Hospital, User, TrackingTask, ClinicProgress, Notification
 from app.models.system_metrics import SystemMetrics
+from app.models.clinic_schedule import ClinicSchedule
+from app.models.notify_log import NotifyLog
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.sync_database_url)

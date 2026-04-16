@@ -69,6 +69,11 @@ celery_app.conf.update(
             "task": "app.tasks.test_scheduler.check_scheduled_test",
             "schedule": 60,
         },
+        # 每天凌晨 1 點統計診間開關診時間（累積足夠資料後可取代即時爬蟲判斷）
+        "build-clinic-schedule-daily": {
+            "task": "app.tasks.maintenance.build_clinic_schedule",
+            "schedule": crontab(hour=1, minute=0),
+        },
         # 每天凌晨 2 點清理超過 7 天的 clinic_progress 舊資料
         "cleanup-old-progress-daily": {
             "task": "app.tasks.maintenance.cleanup_old_progress",
