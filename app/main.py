@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from app.middleware.auth import verify_api_token, check_rate_limit
 from dotenv import load_dotenv
 
@@ -133,6 +134,10 @@ app.include_router(push_router)
 
 _PUBLIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "public")
 _ICONS_DIR = os.path.join(_PUBLIC_DIR, "icons")
+
+# 掛載 JS / CSS 靜態目錄（繞過 aaPanel nginx 的 .js/.css deny 規則）
+app.mount("/js",  StaticFiles(directory=os.path.join(_PUBLIC_DIR, "js")),  name="js")
+app.mount("/css", StaticFiles(directory=os.path.join(_PUBLIC_DIR, "css")), name="css")
 
 _ICON_MAP = {
     "192": "icon-192.png",

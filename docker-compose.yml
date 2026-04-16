@@ -34,6 +34,68 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # === Celery Worker（爬蟲 + 通知）===
+  worker:
+    image: ajz-dindon:latest
+    container_name: medqueue-worker
+    command: celery -A app.tasks.celery_app worker --loglevel=info --max-tasks-per-child=50
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - redis
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    deploy:
+      resources:
+        limits:
+          memory: 320M
+          cpus: "1.0"
+        reservations:
+          memory: 64M
+    healthcheck:
+      test: ["CMD", "celery", "-A", "app.tasks.celery_app", "inspect", "ping"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # === Celery Beat（排程器）===
+  beat:
+    image: ajz-dindon:latest
+    container_name: medqueue-beat
+    command: celery -A app.tasks.celery_app beat --loglevel=info --schedule=/app/data/celerybeat-schedule
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - redis
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    deploy:
+      resources:
+        limits:
+          memory: 160M
+          cpus: "0.2"
+        reservations:
+          memory: 32M
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
   # === Flower（Celery 監控儀表板，僅內網）===
   flower:
     build: .
@@ -74,7 +136,6 @@ services:
       --maxmemory-policy allkeys-lru
       --save ""
       --appendonly no
-      --requirepass ${REDIS_PASSWORD}
     deploy:
       resources:
         limits:
