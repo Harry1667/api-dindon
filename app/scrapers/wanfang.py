@@ -67,7 +67,7 @@ class WanfangAdapter(BaseHospitalAdapter):
                 logger.info(f"[{self.hospital_code}] 成功解析 {len(results)} 個診間")
                 return results
 
-        except httpx.HTTPError as e:
+        except Exception as e:
             logger.error(f"[{self.hospital_code}] 抓取失敗: {e}")
             return []
 

@@ -152,10 +152,11 @@ async def _do_build_schedule():
 
 @celery_app.task(name="app.tasks.maintenance.cleanup_stale_web_tracks")
 def cleanup_stale_web_tracks():
-    """清理過期的網頁追蹤任務（每 30 分鐘執行）
+    """清理過期的 web/test 追蹤任務（每 30 分鐘執行）
 
-    條件：source=web + status=ACTIVE + 建立超過 4 小時
-    代表用戶已離開網頁或診別已結束，自動標為 cancelled
+    條件：source IN (web, test) + status=ACTIVE + 建立超過 4 小時
+    web：用戶已離開網頁或診別已結束
+    test：壓測殘留，避免累積
     """
     _run_async(_do_cleanup_web_tracks())
 
@@ -170,15 +171,64 @@ async def _do_cleanup_web_tracks():
             result = await session.execute(
                 text(
                     "UPDATE tracking_tasks SET status='CANCELLED' "
-                    "WHERE source='web' AND status='ACTIVE' AND created_at < :cutoff"
+                    "WHERE source IN ('web','test') AND status='ACTIVE' AND created_at < :cutoff"
                 ),
                 {"cutoff": cutoff},
             )
             await session.commit()
             count = result.rowcount
         if count:
-            logger.info(f"[maintenance] 清理網頁追蹤：{count} 筆過期任務自動取消")
+            logger.info(f"[maintenance] 清理過期追蹤：{count} 筆 web/test 任務自動取消")
     except Exception as e:
-        logger.error(f"[maintenance] 清理網頁追蹤失敗: {e}")
+        logger.error(f"[maintenance] 清理過期追蹤失敗: {e}")
+    finally:
+        await engine.dispose()
+
+
+@celery_app.task(name="app.tasks.maintenance.purge_old_test_data")
+def purge_old_test_data():
+    """清除超過保留期的 test 任務與孤兒 notify_log（每日凌晨 2:30 執行）
+
+    - 刪除 source=test 且 created_at > 3 天的任務
+    - 刪除 task_id 已不存在的 notify_log（孤兒）
+    """
+    _run_async(_do_purge_old_test_data())
+
+
+async def _do_purge_old_test_data():
+    cutoff = datetime.utcnow() - timedelta(days=3)
+    engine = create_async_engine(settings.database_url, echo=False)
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    try:
+        async with session_factory() as session:
+            # 刪過期 test 任務
+            r1 = await session.execute(
+                text(
+                    "DELETE FROM tracking_tasks "
+                    "WHERE source='test' AND created_at < :cutoff"
+                ),
+                {"cutoff": cutoff},
+            )
+            tasks_deleted = r1.rowcount
+
+            # 刪孤兒 notify_log（對應任務已不存在）
+            r2 = await session.execute(
+                text(
+                    "DELETE FROM notify_log "
+                    "WHERE task_id NOT IN (SELECT id FROM tracking_tasks)"
+                )
+            )
+            logs_deleted = r2.rowcount
+
+            await session.commit()
+
+        if tasks_deleted or logs_deleted:
+            logger.info(
+                f"[maintenance] Purge: 刪 {tasks_deleted} 筆舊 test 任務 + "
+                f"{logs_deleted} 筆孤兒 notify_log"
+            )
+    except Exception as e:
+        logger.error(f"[maintenance] Purge 失敗: {e}")
     finally:
         await engine.dispose()

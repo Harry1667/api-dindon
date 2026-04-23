@@ -57,6 +57,10 @@ class Settings:
     enable_wanfang_scraper: bool = field(
         default_factory=lambda: os.getenv("ENABLE_WANFANG_SCRAPER", "false").lower() == "true"
     )
+    # SOCKS5 代理（NAS microsocks → AWS 反向隧道，用於繞過 IP 封鎖）
+    socks5_proxy: str = field(
+        default_factory=lambda: os.getenv("SOCKS5_PROXY", "")
+    )
     enable_auto_create_tables: bool = field(
         default_factory=lambda: os.getenv("ENABLE_AUTO_CREATE_TABLES", "false").lower() == "true"
     )

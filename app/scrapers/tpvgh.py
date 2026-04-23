@@ -14,6 +14,7 @@ HTML 結構（li.textbox）：
   <b>    已叫最大號燈：{number}
 """
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timezone, timedelta
@@ -80,18 +81,24 @@ class TpvghAdapter(BaseHospitalAdapter):
         self, client: httpx.AsyncClient, time_code: str
     ) -> list[tuple[str, str]]:
         """取得指定時段的科別列表"""
-        try:
-            resp = await client.get(
-                f"{MOBILE_BASE}/seltime",
-                params={"selTime": time_code},
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36",
-                },
-            )
-            resp.raise_for_status()
-        except Exception as e:
-            logger.error(f"[{self.hospital_code}] 取時段 {time_code} 科別失敗: {e}")
-            return []
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36",
+        }
+        for attempt in range(2):
+            try:
+                resp = await client.get(
+                    f"{MOBILE_BASE}/seltime",
+                    params={"selTime": time_code},
+                    headers=headers,
+                )
+                resp.raise_for_status()
+                break
+            except Exception as e:
+                if attempt == 0:
+                    await asyncio.sleep(3)  # 503 通常是暫時過載，等 3 秒再試
+                else:
+                    logger.warning(f"[{self.hospital_code}] 取時段 {time_code} 科別失敗: {e}")
+                    return []
 
         soup = BeautifulSoup(resp.text, "html.parser")
         sections = []

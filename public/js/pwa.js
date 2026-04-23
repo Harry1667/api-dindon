@@ -66,6 +66,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     line_user_id: _lineUid,
+                    guest_id: localStorage.getItem('dd_guest_id') || null,
                     subscription: sub.toJSON(),
                     user_agent: navigator.userAgent,
                     platform: isIOS ? 'ios' : (isAndroid ? 'android' : 'desktop'),

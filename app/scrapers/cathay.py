@@ -18,6 +18,7 @@ from bs4 import BeautifulSoup
 
 from app.scrapers.base import BaseHospitalAdapter
 from app.schemas.clinic import ClinicProgressData
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ class CathayAdapter(BaseHospitalAdapter):
         }
 
         all_results = []
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, proxy=settings.socks5_proxy or None) as client:
             # Step 1: 取得 room 列表
             room_map = await self._fetch_room_list(client)
             if not room_map:

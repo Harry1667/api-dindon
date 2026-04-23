@@ -14,6 +14,7 @@ import httpx
 
 from app.scrapers.base import BaseHospitalAdapter
 from app.schemas.clinic import ClinicProgressData
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ class ShinkongAdapter(BaseHospitalAdapter):
 
         # Step 2: 查詢每個科別的看診進度
         all_results = []
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, proxy=settings.socks5_proxy or None) as client:
             for code, name in division_codes:
                 try:
                     results = await self._fetch_progress(client, code, name, headers, now)
@@ -69,7 +70,7 @@ class ShinkongAdapter(BaseHospitalAdapter):
     async def _fetch_division_codes(self, headers: dict) -> list[tuple[str, str]]:
         """取得科別列表（含子科別）"""
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with httpx.AsyncClient(timeout=15.0, proxy=settings.socks5_proxy or None) as client:
                 resp = await client.get(
                     f"{API_BASE}/RegistrationDivision",
                     headers=headers,

@@ -39,6 +39,7 @@ class PushSubscription(BaseModel):
 
 class SubscribeRequest(BaseModel):
     line_user_id: str | None = None
+    guest_id: str | None = None
     subscription: PushSubscription
     user_agent: str | None = None
     platform: str | None = Field(None, description="ios/android/desktop")
@@ -46,6 +47,7 @@ class SubscribeRequest(BaseModel):
 
 class TestPushRequest(BaseModel):
     line_user_id: str | None = None
+    guest_id: str | None = None
     endpoint_hash: str | None = None
     title: str = "叮咚到號"
     body: str = "測試通知 — 這是 PWA Web Push 測試"
@@ -55,9 +57,12 @@ def _endpoint_hash(endpoint: str) -> str:
     return hashlib.sha256(endpoint.encode()).hexdigest()[:16]
 
 
-def _sub_key(line_user_id: str | None, endpoint: str) -> str:
+def _sub_key(line_user_id: str | None, guest_id: str | None, endpoint: str) -> str:
+    """優先級：line > guest > anon(hash)"""
     if line_user_id:
         return f"push_sub:line:{line_user_id}"
+    if guest_id:
+        return f"push_sub:guest:{guest_id}"
     return f"push_sub:anon:{_endpoint_hash(endpoint)}"
 
 
@@ -75,10 +80,11 @@ async def subscribe(req: SubscribeRequest, request: Request):
     cache = request.app.state.cache
     redis = cache.redis  # 共用 redis 連線
 
-    key = _sub_key(req.line_user_id, req.subscription.endpoint)
+    key = _sub_key(req.line_user_id, req.guest_id, req.subscription.endpoint)
     payload = {
         "subscription": req.subscription.model_dump(),
         "line_user_id": req.line_user_id,
+        "guest_id": req.guest_id,
         "user_agent": req.user_agent,
         "platform": req.platform,
     }
@@ -86,7 +92,7 @@ async def subscribe(req: SubscribeRequest, request: Request):
 
     logger.info(
         f"web push subscribed: key={key} platform={req.platform} "
-        f"line_user_id={req.line_user_id}"
+        f"line_user_id={req.line_user_id} guest_id={req.guest_id}"
     )
     return {
         "status": "ok",
@@ -100,7 +106,7 @@ async def unsubscribe(req: SubscribeRequest, request: Request):
     """取消訂閱"""
     cache = request.app.state.cache
     redis = cache.redis
-    key = _sub_key(req.line_user_id, req.subscription.endpoint)
+    key = _sub_key(req.line_user_id, req.guest_id, req.subscription.endpoint)
     await redis.delete(key)
     logger.info(f"web push unsubscribed: key={key}")
     return {"status": "ok"}
@@ -115,12 +121,14 @@ async def send_test_push(req: TestPushRequest, request: Request):
     # 找 subscription
     if req.line_user_id:
         key = f"push_sub:line:{req.line_user_id}"
+    elif req.guest_id:
+        key = f"push_sub:guest:{req.guest_id}"
     elif req.endpoint_hash:
         key = f"push_sub:anon:{req.endpoint_hash}"
     else:
         raise HTTPException(
             status_code=400,
-            detail="必須提供 line_user_id 或 endpoint_hash",
+            detail="必須提供 line_user_id、guest_id 或 endpoint_hash",
         )
 
     raw = await redis.get(key)
@@ -175,12 +183,13 @@ async def _send_web_push(subscription: dict[str, Any], payload: dict[str, Any]) 
     await asyncio.to_thread(_do_send)
 
 
-# 內部呼叫 helper(Phase 4 notifier 會用)
-async def send_push_to_user(line_user_id: str, payload: dict[str, Any], request: Request) -> bool:
-    """對單一 line user 發 Web Push。回傳是否成功。"""
-    cache = request.app.state.cache
-    redis = cache.redis
-    key = f"push_sub:line:{line_user_id}"
+# 內部呼叫 helper(notifier / celery worker 用)
+async def send_push_by_key(redis, key: str, payload: dict[str, Any]) -> bool:
+    """對指定 Redis key 對應的訂閱發 Web Push。回傳是否成功。
+
+    key 格式：push_sub:line:{line_user_id} 或 push_sub:guest:{guest_id}
+    失敗且 410/404/Gone → 自動刪除過期訂閱
+    """
     raw = await redis.get(key)
     if not raw:
         return False
@@ -189,8 +198,16 @@ async def send_push_to_user(line_user_id: str, payload: dict[str, Any], request:
         await _send_web_push(data["subscription"], payload)
         return True
     except Exception as e:
-        logger.warning(f"send_push_to_user failed for {line_user_id}: {e}")
+        logger.warning(f"send_push_by_key failed key={key}: {e}")
         msg = str(e).lower()
         if "410" in msg or "404" in msg or "gone" in msg:
             await redis.delete(key)
         return False
+
+
+async def send_push_to_line_user(redis, line_user_id: str, payload: dict[str, Any]) -> bool:
+    return await send_push_by_key(redis, f"push_sub:line:{line_user_id}", payload)
+
+
+async def send_push_to_guest(redis, guest_id: str, payload: dict[str, Any]) -> bool:
+    return await send_push_by_key(redis, f"push_sub:guest:{guest_id}", payload)

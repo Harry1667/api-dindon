@@ -19,6 +19,7 @@ import httpx
 
 from app.scrapers.base import BaseHospitalAdapter
 from app.schemas.clinic import ClinicProgressData
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ class MohwOregAdapter(BaseHospitalAdapter):
         }
 
         try:
-            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, verify=False) as client:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, verify=False, proxy=settings.socks5_proxy or None) as client:
                 # 先建立 session
                 await client.get(self.base_url, headers={
                     "User-Agent": headers["User-Agent"],
@@ -130,7 +131,7 @@ class MohwOregAdapter(BaseHospitalAdapter):
 
     async def get_departments(self) -> list[str]:
         try:
-            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, verify=False) as client:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, verify=False, proxy=settings.socks5_proxy or None) as client:
                 await client.get(self.base_url)
                 resp = await client.post(
                     f"{self._api_base}/GetSectCategoryList",

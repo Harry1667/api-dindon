@@ -5,7 +5,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from app.middleware.auth import verify_api_token, check_rate_limit
 from dotenv import load_dotenv
@@ -53,6 +53,11 @@ except ImportError:
         level=logging.DEBUG if settings.app_debug else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+
+# 靜音 httpx 的每筆請求 INFO log（爬蟲量太大，會污染 log 且部分 500 是預期行為）
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 
@@ -187,6 +192,12 @@ async def pwa_icon(key: str):
         media_type="image/png",
         headers={"Cache-Control": "public, max-age=86400"},
     )
+
+
+@app.get("/")
+async def root():
+    """根路徑導向主入口頁面"""
+    return RedirectResponse(url="/chat", status_code=302)
 
 
 @app.get("/health")

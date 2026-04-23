@@ -59,9 +59,9 @@ AdapterRegistry.register(ntuh_main)                    # 台大醫院
 AdapterRegistry.register(TsghAdapter())                # 三軍總醫院
 AdapterRegistry.register(TpvghAdapter())               # 台北榮總
 AdapterRegistry.register(taipei_changgung)             # 台北長庚
-AdapterRegistry.register(CathayAdapter())              # 國泰醫院
+AdapterRegistry.register(CathayAdapter())              # 國泰醫院（走 NAS SOCKS5 proxy）
 AdapterRegistry.register(mackay_taipei)                # 馬偕醫院 台北
-# AdapterRegistry.register(ShinkongAdapter())          # 新光醫院 — AWS IP 封鎖，ConnectTimeout
+AdapterRegistry.register(ShinkongAdapter())            # 新光醫院（走 NAS SOCKS5 proxy）
 if settings.enable_wanfang_scraper:
     AdapterRegistry.register(WanfangAdapter())           # 萬芳醫院（需 ENABLE_WANFANG_SCRAPER=true）
 
@@ -72,11 +72,11 @@ AdapterRegistry.register(ChghAdapter())                # 振興醫院
 
 # --- 新北市 ---
 AdapterRegistry.register(FemhAdapter())                # 亞東醫院
-# AdapterRegistry.register(tzuchi_taipei)              # 台北慈濟醫院 — AWS IP 封鎖，連線 timeout
-# AdapterRegistry.register(tzuchi_xindian)             # 台北慈濟(新店) — AWS IP 封鎖，連線 timeout
+AdapterRegistry.register(tzuchi_taipei)                # 台北慈濟醫院（走 NAS SOCKS5 proxy）
+AdapterRegistry.register(tzuchi_xindian)               # 台北慈濟(新店)（走 NAS SOCKS5 proxy）
 AdapterRegistry.register(mackay_tamsui)                # 馬偕醫院 淡水
-# AdapterRegistry.register(tph_adapter)                # 衛福部臺北醫院 — AWS IP 封鎖，403
-AdapterRegistry.register(cathay_xizhi)                 # 汐止國泰
+AdapterRegistry.register(tph_adapter)                  # 衛福部臺北醫院（走 NAS SOCKS5 proxy）
+AdapterRegistry.register(cathay_xizhi)                 # 汐止國泰（走 NAS SOCKS5 proxy）
 AdapterRegistry.register(tucheng_changgung)            # 土城長庚
 AdapterRegistry.register(banqiao_adapter)              # 新北聯合醫院 板橋
 AdapterRegistry.register(sanchong_adapter)             # 新北聯合醫院 三重
@@ -91,7 +91,7 @@ AdapterRegistry.register(taoyuan_changgung)            # 桃園長庚
 
 # --- 台中 ---
 AdapterRegistry.register(TcvghAdapter())               # 台中榮總
-# AdapterRegistry.register(fyh_adapter)                # 衛福部豐原醫院 — AWS IP 封鎖，403
+AdapterRegistry.register(fyh_adapter)                  # 衛福部豐原醫院（走 NAS SOCKS5 proxy）
 
 # --- 雲嘉 ---
 AdapterRegistry.register(yunlin_changgung)             # 雲林長庚

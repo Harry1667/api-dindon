@@ -1,11 +1,16 @@
 """Celery 應用設定"""
 
+import logging
 import os
 from celery import Celery
 from celery.schedules import crontab
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# 靜音 httpx 每筆請求 INFO log（爬蟲量太大會污染 log，部分 500 是預期行為）
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
 
@@ -78,6 +83,16 @@ celery_app.conf.update(
         "cleanup-old-progress-daily": {
             "task": "app.tasks.maintenance.cleanup_old_progress",
             "schedule": crontab(hour=2, minute=0),
+        },
+        # 每 30 分鐘清理過期的 web/test 追蹤任務（>4 小時 ACTIVE → CANCELLED）
+        "cleanup-stale-tracks-30min": {
+            "task": "app.tasks.maintenance.cleanup_stale_web_tracks",
+            "schedule": crontab(minute="*/30"),
+        },
+        # 每天凌晨 2:30 清除 >3 天的 test 任務 + 孤兒 notify_log
+        "purge-old-test-data-daily": {
+            "task": "app.tasks.maintenance.purge_old_test_data",
+            "schedule": crontab(hour=2, minute=30),
         },
         # 每分鐘收集系統指標（壓力負載圖）
         "collect-metrics-every-minute": {

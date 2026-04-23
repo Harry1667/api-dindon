@@ -13,6 +13,7 @@
     - 有看診時顯示：醫師、診間號、目前號碼 等
 """
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timezone, timedelta
@@ -54,13 +55,18 @@ class ChghAdapter(BaseHospitalAdapter):
         all_results = []
         async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
             for dept_name, pidm in dept_list:
-                try:
-                    results = await self._fetch_dept_progress(
-                        client, dept_name, pidm, headers, now
-                    )
-                    all_results.extend(results)
-                except Exception as e:
-                    logger.warning(f"[{self.hospital_code}] {dept_name} 失敗: {e}")
+                for attempt in range(2):  # 最多重試一次
+                    try:
+                        results = await self._fetch_dept_progress(
+                            client, dept_name, pidm, headers, now
+                        )
+                        all_results.extend(results)
+                        break
+                    except Exception as e:
+                        if attempt == 0:
+                            await asyncio.sleep(2)  # 等 2 秒再重試
+                        else:
+                            logger.warning(f"[{self.hospital_code}] {dept_name} 失敗: {e}")
 
         logger.info(f"[{self.hospital_code}] 共取得 {len(all_results)} 個診間")
         return all_results

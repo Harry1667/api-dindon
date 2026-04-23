@@ -18,6 +18,7 @@ from bs4 import BeautifulSoup
 
 from app.scrapers.base import BaseHospitalAdapter
 from app.schemas.clinic import ClinicProgressData
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,12 @@ class TzuchiAdapter(BaseHospitalAdapter):
         else:
             active_sessions = ["2", "3"]
 
-        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0), follow_redirects=True) as client:
+        proxy = settings.socks5_proxy or None
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0),
+            follow_redirects=True,
+            proxy=proxy,
+        ) as client:
             # Step 1: GET 頁面取得 form state + 科別
             try:
                 resp = await client.get(self.base_url, headers=headers)
@@ -235,7 +241,7 @@ class TzuchiAdapter(BaseHospitalAdapter):
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         }
         try:
-            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, proxy=settings.socks5_proxy or None) as client:
                 resp = await client.get(self.base_url, headers=headers)
                 resp.raise_for_status()
                 soup = BeautifulSoup(resp.text, "html.parser")

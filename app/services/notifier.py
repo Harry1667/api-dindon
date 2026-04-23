@@ -272,6 +272,19 @@ class NotifierService:
         except Exception as e:
             logger.warning(f"[notifier] notify_log 寫入失敗（非關鍵）: {e}")
 
+    async def _push_web(self, task, line_user_id: str | None, title: str, body: str):
+        """對 task 對應的訂閱發 Web Push（LINE 用戶和 web guest 都試，失敗不拋）"""
+        try:
+            from app.api.push import send_push_to_line_user, send_push_to_guest
+            payload = {"title": title, "body": body, "url": "/chat", "tag": f"dindon-{task.id}"}
+            redis = self.cache.redis
+            if line_user_id:
+                await send_push_to_line_user(redis, line_user_id, payload)
+            if getattr(task, "guest_id", None):
+                await send_push_to_guest(redis, task.guest_id, payload)
+        except Exception as e:
+            logger.warning(f"[notifier] web push 失敗（非關鍵）task={task.id}: {e}")
+
     async def _send(self, task, line_user_id: str, message: str, remaining: int):
         """發送通知，更新剩餘數，但不結束追蹤
 
@@ -279,6 +292,11 @@ class NotifierService:
         下次 check cycle 會重新觸發通知。
         """
         track_log(task.id, "notify", message[:300])
+        # 先發 Web Push（LINE 用戶 + web guest 都會試）— 失敗不影響後續
+        title = "叮咚到號" if "🔔" in message[:10] else "看診進度更新"
+        body = message.split("\n", 1)[-1][:100] if "\n" in message else message[:100]
+        await self._push_web(task, line_user_id, title, body)
+
         if line_user_id:
             try:
                 await self.line_bot.push_message(line_user_id, message)
@@ -312,6 +330,11 @@ class NotifierService:
         下次 check cycle 會重新嘗試通知。
         """
         track_log(task.id, "notify", message[:300])
+        # Step 0: Web Push（LINE 用戶 + web guest）— 失敗不影響後續
+        title = "🔔 輪到您了！" if end_reason == "arrived" else "叮咚追蹤結束"
+        body = message.split("\n", 1)[-1][:100] if "\n" in message else message[:100]
+        await self._push_web(task, line_user_id, title, body)
+
         # Step 1: 有 LINE userId 才推播，否則直接標記完成
         if line_user_id:
             try:
