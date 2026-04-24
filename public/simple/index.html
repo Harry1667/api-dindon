@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FAF6EE">
+<title>叮咚到號 · 簡易版</title>
+<link rel="stylesheet" href="/simple-static/simple.css?v=1776991770">
+</head>
+<body class="layout-fixed">
+
+<!-- 固定頂部：header + tabs -->
+<div class="top">
+  <header class="bar">
+    <button class="back" onclick="location.href='/chat'"><span class="arrow">‹</span><span class="label">返回</span></button>
+    <div class="brand">叮咚到號</div>
+  </header>
+  <div class="title" style="margin:6px 4px 0">請選擇您要去的醫院</div>
+  <div class="step">第 1 步，共 4 步</div>
+  <div class="tabs" id="tabs">
+    <button class="tab on" data-r="north">北部<span class="n">—</span></button>
+    <button class="tab"    data-r="central">中部<span class="n">—</span></button>
+    <button class="tab"    data-r="south">南部<span class="n">—</span></button>
+  </div>
+</div>
+
+<!-- 中間捲動 -->
+<div class="scroll">
+  <div id="lastTrackWrap"></div>
+  <div class="region-lbl" id="regionLbl">北部</div>
+  <div class="cards two-col" id="cards"><div class="spinner-wrap"><div class="spinner"></div></div></div>
+</div>
+
+
+<script src="/simple-static/simple.js?v=1776991770"></script>
+<script>
+let hospitals = [];
+let currentRegion = 'north';
+
+(async function init() {
+  renderLastTrack();
+  refreshLastTrackStatus();
+
+  try {
+    const raw = await fetchHospitals();
+    hospitals = expandHospitals(raw);
+    const counts = { north: 0, central: 0, south: 0 };
+    hospitals.forEach(h => { const r = regionOf(h.code); if (counts[r] !== undefined) counts[r]++; });
+    document.querySelectorAll('.tab').forEach(t => {
+      const r = t.dataset.r;
+      t.querySelector('.n').textContent = `${counts[r]} 家`;
+    });
+    render();
+  } catch (e) {
+    document.getElementById('cards').innerHTML = `<div class="empty">載入失敗，請重新整理</div>`;
+  }
+})();
+
+function render() {
+  let filtered = hospitals.filter(h => regionOf(h.code) === currentRegion);
+  // 按點擊次數排序（常點的靠前），次數相同維持原順序
+  filtered = sortByPick(filtered, h => pickCount('hospital', h.vid));
+  document.getElementById('regionLbl').textContent = `${REGION_LABELS[currentRegion]} · 共 ${filtered.length} 家醫院`;
+  const el = document.getElementById('cards');
+  if (!filtered.length) { el.innerHTML = `<div class="empty">此地區暫無醫院</div>`; return; }
+  el.innerHTML = filtered.map(h => {
+    const n = pickCount('hospital', h.vid);
+    const star = n >= 3 ? '⭐' : (n >= 1 ? '•' : '');
+    return `
+    <button class="card" data-vid="${h.vid}" onclick="pick('${h.vid}')">
+      <div class="name">${h.name}${h.branch ? `<div class="branch">${h.branch}</div>` : ''}</div>
+      <div class="loc">${h.loc || ''}${star ? ` <span style="color:var(--accent);font-weight:800;margin-left:4px">${star}</span>` : ''}</div>
+    </button>`;
+  }).join('');
+}
+
+function pick(vid) {
+  const h = hospitals.find(x => x.vid === vid);
+  if (!h) return;
+  bumpPick('hospital', vid);
+  saveSetup({
+    hospital_code: h.code,
+    hospital_name: h.fullName || h.name,
+    branch_prefix: h.branch_prefix || '',
+  });
+  go('/simple/dept');
+}
+
+document.getElementById('tabs').addEventListener('click', (e) => {
+  const tab = e.target.closest('.tab');
+  if (!tab) return;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
+  tab.classList.add('on');
+  currentRegion = tab.dataset.r;
+  render();
+  document.querySelector('.scroll').scrollTop = 0;
+});
+
+function jumpLast() {
+  const last = L.get('dd_last_tracked', null);
+  if (!last) return;
+  const active = isTrackingActive(last);
+  if (active) {
+    // 還在追蹤中 → 直接到追蹤頁
+    go('/simple/tracking');
+  } else {
+    // 已過期 → 帶資料重新設定
+    saveSetup({
+      hospital_code: last.hospital_code,
+      hospital_name: last.hospital_name,
+      department: last.department,
+      department_display: last.department_display,
+      doctor_name: last.doctor_name,
+      clinic_room: last.clinic_room,
+      session: last.session,
+    });
+    go('/simple/enter');
+  }
+}
+
+/* 判斷追蹤是否還在進行中
+   - 有 started_at 且 < 4 小時（backend 每 30 分自動取消 >4 小時 web/test 任務）
+*/
+function isTrackingActive(last) {
+  if (!last || !last.started_at) return false;
+  const ageMs = Date.now() - last.started_at;
+  return ageMs < 4 * 60 * 60 * 1000;
+}
+
+function renderLastTrack(live) {
+  const last = L.get('dd_last_tracked', null);
+  const w = document.getElementById('lastTrackWrap');
+  if (!last || !last.hospital_name) { w.innerHTML = ''; return; }
+  const active = isTrackingActive(last);
+  const label  = active ? '⟳ 目前追蹤' : '上次追蹤';
+  const color  = active ? '#1B5E3A' : '#8A8F9E';
+  const bg     = active ? '#F0F7F3' : '#FFFFFF';
+  const border = active ? '#1B5E3A' : '#E3DCC9';
+  const pulse  = active ? '<span class="live-dot"></span>' : '';
+
+  // 右側重點：依狀態變色 + 顯示「您的號碼」+ 狀態文字
+  let rightHtml;
+  if (active && live) {
+    let stateClass = '';
+    let remText = '';
+    if (live.passed) {
+      stateClass = 'passed'; remText = '已過號';
+    } else if (live.rem === 0) {
+      stateClass = 'yours'; remText = '輪到您';
+    } else {
+      remText = `還差 ${live.rem} 號`;
+    }
+    rightHtml = `
+      <div class="lt-right ${stateClass}">
+        <div class="lt-lbl">目前看到</div>
+        <div class="lt-n">${live.cur}</div>
+        <div class="lt-u">號</div>
+        <div class="lt-mine">您是 <b>${last.user_number}</b> 號</div>
+        <div class="lt-rem">${remText}</div>
+      </div>`;
+  } else if (active) {
+    rightHtml = `
+      <div class="lt-right loading">
+        <div class="lt-lbl">您的號碼</div>
+        <div class="lt-n">${last.user_number}</div>
+        <div class="lt-u">號</div>
+        <div class="lt-rem">追蹤中…</div>
+      </div>`;
+  } else {
+    rightHtml = `
+      <div class="lt-right expired">
+        <div class="lt-lbl">您的號碼</div>
+        <div class="lt-n">${last.user_number}</div>
+        <div class="lt-u">號</div>
+        <div class="lt-rem">點擊再追蹤</div>
+      </div>`;
+  }
+
+  w.innerHTML = `
+    <button class="card lt-card" style="border-color:${border};background:${bg};margin-bottom:16px"
+            onclick="jumpLast()">
+      <div class="lt-left">
+        <div class="meta" style="color:${color};font-weight:700;display:flex;align-items:center;gap:6px">
+          ${pulse}<span>${label}</span>
+        </div>
+        <div class="name">${last.hospital_name}</div>
+        <div class="loc">${last.department_display || last.department || ''} · ${last.doctor_name || ''}${last.clinic_room ? ' · ' + last.clinic_room : ''}</div>
+      </div>
+      ${rightHtml}
+    </button>`;
+}
+
+/* 針對「目前追蹤」抓即時進度（與 /tracking 同一比對邏輯）*/
+async function refreshLastTrackStatus() {
+  const last = L.get('dd_last_tracked', null);
+  if (!last || !isTrackingActive(last)) return;
+  try {
+    const list = await fetchProgress(last.hospital_code);
+    const match = findMatchingRoom(list, last);
+    if (!match) return;
+    const cur = match.current_number || 0;
+    const my = last.user_number;
+    const rem = Math.max(0, my - cur);
+    const passed = cur > my;   // 已過號
+    renderLastTrack({ cur, rem, passed });
+  } catch {}
+}
+
+/* 每 30 秒自動更新 + 回到頁面時立即更新（跟 /tracking 同步）*/
+setInterval(refreshLastTrackStatus, 30000);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshLastTrackStatus();
+});
+</script>
+</body>
+</html>

@@ -272,7 +272,15 @@ class NtuhAdapter(BaseHospitalAdapter):
         return results
 
     async def get_departments(self) -> list[str]:
-        return [d for d in self.depts]
+        """回傳中文科別名稱；對未定義的代碼，略過（不秀英文）"""
+        names = []
+        seen = set()
+        for code in self.depts:
+            name = DEPT_NAMES.get(code)
+            if name and name not in seen:
+                names.append(name)
+                seen.add(name)
+        return names
 
 
 # === 預建院區（8 院區）===

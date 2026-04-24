@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FAF6EE">
+<title>輸入您的號碼</title>
+<link rel="stylesheet" href="/simple-static/simple.css?v=1776991770">
+<style>
+  body.enter-fixed {
+    height: 100vh; height: 100dvh;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    padding: 0; max-width: 460px; margin: 0 auto;
+  }
+
+  /* 表頭（同 /simple）*/
+  .enter-fixed .top {
+    padding: 10px 16px 8px;
+    background: var(--bg);
+    box-shadow: 0 1px 0 var(--border);
+    flex: 0 0 auto;
+  }
+  .enter-fixed .bar { height: 44px; margin: 0; display: flex; align-items: center; }
+  .enter-fixed .back { height: 44px; padding: 0 14px; }
+  .enter-fixed .brand {
+    margin-left: auto; font-weight: 800; font-size: 18px;
+    color: var(--ink); letter-spacing: 1px;
+  }
+  .enter-fixed h1 {
+    margin: 10px 2px 2px; font-size: 22px; font-weight: 800;
+    color: var(--ink); letter-spacing: -0.3px;
+  }
+
+  /* 醫院資訊主卡：左文字資訊 + 右側目前號碼 */
+  .info {
+    flex: 0 0 auto;
+    margin: 10px 16px 0;
+    background: #fff; border: 2.5px solid var(--border);
+    border-radius: 18px;
+    padding: 12px 14px;
+    box-shadow: 0 2px 0 rgba(0,0,0,0.03);
+    display: flex; align-items: stretch; gap: 12px;
+  }
+  .info .left  { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+  .info .right {
+    flex: 0 0 auto; min-width: 110px;
+    background: var(--accent-s);
+    border: 2px solid var(--accent);
+    border-radius: 14px;
+    padding: 8px 10px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center;
+  }
+  .info.no-cur .right { display: none; }
+
+  .info .row-hosp { font-size: 22px; font-weight: 900; color: var(--ink); letter-spacing: -0.3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .info .row-dept {
+    font-size: 17px; font-weight: 700; color: var(--ink-soft);
+    margin-top: 3px; letter-spacing: 0.3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .info .row-doc {
+    font-size: 19px; font-weight: 800; color: var(--ink);
+    margin-top: 5px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .info .row-doc .room { color: var(--ink-soft); font-weight: 700; margin-left: 6px; }
+
+  .info .cur-lbl { font-size: 13px; font-weight: 700; color: var(--accent-d); letter-spacing: 0.5px; }
+  .info .cur-n {
+    font-size: 40px; font-weight: 900; color: var(--accent);
+    line-height: 1; letter-spacing: -1.5px;
+    font-variant-numeric: tabular-nums;
+    margin-top: 2px;
+  }
+  .info .cur-u { font-size: 15px; font-weight: 800; color: var(--accent-d); margin-top: 2px; }
+
+  /* 提示：您的號碼 */
+  .hint-my {
+    flex: 0 0 auto;
+    text-align: center; margin: 10px 16px 4px;
+    font-size: 17px; font-weight: 700; color: var(--ink-soft);
+    letter-spacing: 0.5px;
+  }
+
+  /* 號碼顯示框（輸入中 / 輸入後）*/
+  .disp {
+    flex: 0 0 auto;
+    margin: 4px 16px 0; padding: 6px 14px;
+    background: #fff; border: 2.5px solid var(--ink);
+    border-radius: 14px; text-align: center;
+    font-size: 40px; font-weight: 900; color: var(--accent);
+    letter-spacing: 6px; height: 54px;
+    display: flex; align-items: center; justify-content: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .disp.empty { color: #BFB7A2; font-size: 16px; font-weight: 600; letter-spacing: 0; }
+
+  /* 鍵盤 */
+  .kb-wrap {
+    flex: 1 1 auto; display: flex; flex-direction: column;
+    padding: 8px 16px 0; min-height: 0;
+  }
+  .kb {
+    flex: 1 1 auto; display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(4, 1fr);
+    gap: 6px; min-height: 0; max-height: 280px;
+  }
+  .k {
+    background: #fff; border: 2px solid var(--border);
+    border-radius: 12px; font-size: 24px; font-weight: 800; color: var(--ink);
+    box-shadow: 0 2px 0 var(--border); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 0;
+  }
+  .k:active { transform: translateY(2px); box-shadow: 0 0 0 var(--border); }
+  .k.del {
+    background: #FFF0F0; color: var(--danger);
+    border-color: #F5C2C2; box-shadow: 0 2px 0 #F5C2C2;
+    font-size: 17px;
+  }
+  .k.ok {
+    background: var(--accent); color: #fff;
+    border-color: var(--accent); box-shadow: 0 2px 0 var(--accent-d);
+    font-size: 17px; letter-spacing: 1px;
+  }
+  .k.ok:disabled {
+    background: #D8CFB8; color: #F5EEDC;
+    border-color: #D8CFB8; box-shadow: 0 2px 0 #B0A78F;
+    cursor: not-allowed;
+  }
+  .k.ok:active:not(:disabled) { box-shadow: 0 0 0 var(--accent-d); }
+
+  /* keypad wrap 底部留安全區 */
+  .enter-fixed .kb-wrap {
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+
+  /* 短螢幕（iPhone SE 等）*/
+  @media (max-height: 700px) {
+    .enter-fixed h1 { font-size: 19px; margin-top: 4px; }
+    .info { padding: 10px 12px; margin-top: 6px; gap: 10px; }
+    .info .right { min-width: 96px; padding: 6px 8px; }
+    .info .row-hosp { font-size: 19px; }
+    .info .row-dept { font-size: 15px; margin-top: 2px; }
+    .info .row-doc  { font-size: 16px; margin-top: 3px; }
+    .info .cur-n { font-size: 32px; }
+    .info .cur-lbl { font-size: 12px; }
+    .info .cur-u  { font-size: 13px; }
+    .disp { font-size: 34px; height: 46px; margin-top: 2px; }
+    .disp.empty { font-size: 14px; }
+    .k { font-size: 20px; }
+    .k.del, .k.ok { font-size: 15px; }
+    .kb { gap: 5px; max-height: 280px; }
+  }
+</style>
+</head>
+<body class="enter-fixed">
+
+<div class="top">
+  <header class="bar">
+    <button class="back" onclick="back()"><span class="arrow">‹</span><span class="label">返回</span></button>
+    <div class="brand">叮咚到號</div>
+  </header>
+  <h1>請輸入您的候診號碼</h1>
+</div>
+
+<!-- 醫院資訊主卡：左 = 醫院資料（大字），右 = 目前號碼 -->
+<div class="info no-cur" id="info">
+  <div class="left">
+    <div class="row-hosp" id="iHosp">—</div>
+    <div class="row-dept" id="iDept">—</div>
+    <div class="row-doc"  id="iDoc">—</div>
+  </div>
+  <div class="right">
+    <div class="cur-lbl">目前看到</div>
+    <div class="cur-n" id="iCurN">—</div>
+    <div class="cur-u">號</div>
+  </div>
+</div>
+
+<div class="disp empty" id="disp">請點下方數字</div>
+
+<div class="kb-wrap">
+  <div class="kb">
+    <button class="k" data-k="1">1</button>
+    <button class="k" data-k="2">2</button>
+    <button class="k" data-k="3">3</button>
+    <button class="k" data-k="4">4</button>
+    <button class="k" data-k="5">5</button>
+    <button class="k" data-k="6">6</button>
+    <button class="k" data-k="7">7</button>
+    <button class="k" data-k="8">8</button>
+    <button class="k" data-k="9">9</button>
+    <button class="k del" data-k="del">← 刪除</button>
+    <button class="k" data-k="0">0</button>
+    <button class="k ok"  data-k="ok" id="okBtn" disabled>確定</button>
+  </div>
+</div>
+
+<script src="/simple-static/simple.js?v=1776991770"></script>
+<script>
+const setup = getSetup();
+if (!setup.hospital_code) go('/simple');
+
+document.getElementById('iHosp').textContent = setup.hospital_name || '—';
+document.getElementById('iDept').textContent = setup.department_display || setup.department || '—';
+const docBits = [];
+if (setup.doctor_name) docBits.push(`<span>${setup.doctor_name}</span>`);
+if (setup.clinic_room) docBits.push(`<span class="room">${setup.clinic_room}</span>`);
+document.getElementById('iDoc').innerHTML = docBits.length ? docBits.join('') : '—';
+if (setup.current_number != null) {
+  document.getElementById('info').classList.remove('no-cur');
+  document.getElementById('iCurN').textContent = setup.current_number;
+}
+
+let num = '';
+const disp = document.getElementById('disp');
+const okBtn = document.getElementById('okBtn');
+
+document.querySelector('.kb').addEventListener('click', (e) => {
+  const k = e.target.closest('.k'); if (!k) return;
+  const key = k.dataset.k;
+  if (key === 'ok') { if (num) submit(); return; }
+  if (key === 'del') num = num.slice(0, -1);
+  else if (num.length < 4) num += key;
+  refreshDisp();
+});
+
+/* 實體鍵盤輸入 */
+window.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key;
+  if (k >= '0' && k <= '9') {
+    if (num.length < 4) { num += k; refreshDisp(); }
+    e.preventDefault();
+  } else if (k === 'Backspace' || k === 'Delete') {
+    num = num.slice(0, -1); refreshDisp();
+    e.preventDefault();
+  } else if (k === 'Escape') {
+    num = ''; refreshDisp();
+    e.preventDefault();
+  } else if (k === 'Enter') {
+    if (num && !okBtn.disabled) submit();
+    e.preventDefault();
+  }
+});
+
+function refreshDisp() {
+  if (!num) {
+    disp.textContent = '請點下方數字';
+    disp.classList.add('empty');
+    okBtn.disabled = true;
+    return;
+  }
+  disp.textContent = num;
+  disp.classList.remove('empty');
+  okBtn.disabled = false;
+}
+
+async function submit() {
+  okBtn.disabled = true; okBtn.textContent = '…';
+  try {
+    const r = await startTrack({
+      hospital_code: setup.hospital_code,
+      department: setup.department || '',
+      doctor_name: setup.doctor_name || '',
+      clinic_room: setup.clinic_room || '',
+      session: setup.session || '',
+      user_number: parseInt(num),
+    });
+    if (!r.ok) throw new Error(r.error || 'start_failed');
+    L.set('dd_last_tracked', {
+      hospital_code: setup.hospital_code,
+      hospital_name: setup.hospital_name,
+      department: setup.department,
+      department_display: setup.department_display,
+      doctor_name: setup.doctor_name,
+      clinic_room: setup.clinic_room,
+      session: setup.session,
+      user_number: parseInt(num),
+      track_id: r.track_id,
+      started_at: Date.now(),
+    });
+    S.set('simple_setup', { ...setup, user_number: parseInt(num), track_id: r.track_id });
+    go('/simple/tracking');
+  } catch (e) {
+    toast('設定失敗，請稍後再試');
+    okBtn.disabled = false;
+    okBtn.textContent = '確定';
+  }
+}
+</script>
+</body>
+</html>

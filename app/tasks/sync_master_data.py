@@ -76,8 +76,13 @@ async def _sync_all() -> dict:
                     ))
                 total_progress += len(progress_list)
 
-                # --- 提取並 upsert 診科 ---
-                dept_names = sorted(set(p.department for p in progress_list if p.department))
+                # --- 提取並 upsert 診科（過濾純 ASCII 代碼，不讓英文碼進 DB）---
+                def _has_chinese(s: str) -> bool:
+                    return any('\u4e00' <= ch <= '\u9fff' for ch in s)
+                dept_names = sorted(set(
+                    p.department for p in progress_list
+                    if p.department and _has_chinese(p.department)
+                ))
                 for dept_name in dept_names:
                     result = await session.execute(
                         select(Department).where(

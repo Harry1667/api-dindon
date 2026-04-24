@@ -73,7 +73,7 @@ AdapterRegistry.register(ChghAdapter())                # 振興醫院
 # --- 新北市 ---
 AdapterRegistry.register(FemhAdapter())                # 亞東醫院
 AdapterRegistry.register(tzuchi_taipei)                # 台北慈濟醫院（走 NAS SOCKS5 proxy）
-AdapterRegistry.register(tzuchi_xindian)               # 台北慈濟(新店)（走 NAS SOCKS5 proxy）
+# AdapterRegistry.register(tzuchi_xindian)             # 與台北慈濟為同一家醫院，重複註冊
 AdapterRegistry.register(mackay_tamsui)                # 馬偕醫院 淡水
 AdapterRegistry.register(tph_adapter)                  # 衛福部臺北醫院（走 NAS SOCKS5 proxy）
 AdapterRegistry.register(cathay_xizhi)                 # 汐止國泰（走 NAS SOCKS5 proxy）

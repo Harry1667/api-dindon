@@ -145,6 +145,10 @@ _ICONS_DIR = os.path.join(_PUBLIC_DIR, "icons")
 # 掛載 JS / CSS 靜態目錄（繞過 aaPanel nginx 的 .js/.css deny 規則）
 app.mount("/js",  StaticFiles(directory=os.path.join(_PUBLIC_DIR, "js")),  name="js")
 app.mount("/css", StaticFiles(directory=os.path.join(_PUBLIC_DIR, "css")), name="css")
+# 長輩版 /simple 的靜態資源（簡易入口）
+_SIMPLE_DIR = os.path.join(_PUBLIC_DIR, "simple")
+if os.path.isdir(_SIMPLE_DIR):
+    app.mount("/simple-static", StaticFiles(directory=_SIMPLE_DIR), name="simple_static")
 
 _ICON_MAP = {
     "192": "icon-192.png",
@@ -546,3 +550,36 @@ async def liff_page():
     if os.path.exists(html_path):
         return FileResponse(html_path, media_type="text/html")
     return JSONResponse(status_code=404, content={"error": "頁面不存在"})
+
+
+# === 長輩版 /simple 入口（第二入口，卡片式 step-by-step）===
+def _serve_simple(name: str):
+    path = os.path.join(_SIMPLE_DIR, name)
+    if os.path.exists(path):
+        return FileResponse(path, media_type="text/html")
+    return JSONResponse(status_code=404, content={"error": "頁面不存在"})
+
+
+@app.get("/simple")
+async def simple_home():
+    return _serve_simple("index.html")
+
+
+@app.get("/simple/dept")
+async def simple_dept():
+    return _serve_simple("dept.html")
+
+
+@app.get("/simple/doctor")
+async def simple_doctor():
+    return _serve_simple("doctor.html")
+
+
+@app.get("/simple/enter")
+async def simple_enter():
+    return _serve_simple("enter.html")
+
+
+@app.get("/simple/tracking")
+async def simple_tracking():
+    return _serve_simple("tracking.html")

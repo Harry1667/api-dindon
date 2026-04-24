@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FAF6EE">
+<title>選醫生</title>
+<link rel="stylesheet" href="/simple-static/simple.css?v=1776991770">
+<style>
+  .closed {
+    background: #FFF9EF; border: 2.5px solid #F0E4BE; border-radius: 20px;
+    padding: 28px 22px; text-align: center; margin: 12px 0;
+  }
+  .closed .emo { font-size: 48px; line-height: 1; margin-bottom: 12px; }
+  .closed .headline { font-size: 26px; font-weight: 800; color: var(--ink); margin-bottom: 8px; }
+  .closed .sub { font-size: 18px; color: var(--ink-soft); line-height: 1.6; margin-bottom: 18px; }
+  .closed .countdown { font-size: 15px; color: var(--ink2); margin-top: 12px; }
+  .closed .actions { display: flex; flex-direction: column; gap: 10px; }
+  .closed .secondary { width: 100%; }
+  .dot-anim { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent); margin: 0 2px; animation: dotAnim 1.2s infinite; }
+  .dot-anim:nth-child(2) { animation-delay: 0.2s; }
+  .dot-anim:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes dotAnim {
+    0%, 80%, 100% { opacity: 0.3; transform: scale(0.9); }
+    40% { opacity: 1; transform: scale(1.2); }
+  }
+</style>
+</head>
+<body class="layout-fixed">
+
+<div class="top">
+  <header class="bar">
+    <button class="back" onclick="back()"><span class="arrow">‹</span><span class="label">返回</span></button>
+    <div class="brand" id="hospName">叮咚到號</div>
+  </header>
+  <div class="title" style="margin:6px 4px 0">您找哪位醫生？</div>
+  <div class="step" id="stepMeta">第 3 步，共 4 步</div>
+</div>
+
+<div class="scroll">
+  <div class="cards two-col" id="cards"><div class="spinner-wrap"><div class="spinner"></div></div></div>
+</div>
+
+
+<script src="/simple-static/simple.js?v=1776991770"></script>
+<script>
+const setup = getSetup();
+if (!setup.hospital_code || !setup.department) go('/simple');
+document.getElementById('hospName').textContent = setup.hospital_name || '';
+const deptDisplay = setup.department_display || setup.department;
+document.getElementById('stepMeta').textContent = `${deptDisplay} · 第 3 步，共 4 步`;
+
+let rooms = [];
+let pollTimer = null;
+let secondsLeft = 30;
+let countTimer = null;
+
+(async function init() { await loadRooms(); })();
+
+async function loadRooms() {
+  try {
+    const all = await fetchProgress(setup.hospital_code);
+    rooms = all.filter(r =>
+      !setup.department
+      || (r.department || '').includes(setup.department)
+      || setup.department.includes(r.department || '')
+    );
+    if (rooms.length) {
+      stopPoll();
+      render();
+    } else {
+      renderClosed(false);
+      startPoll();
+    }
+  } catch (e) {
+    renderClosed(true);
+    startPoll();
+  }
+}
+
+function render() {
+  const el = document.getElementById('cards');
+  el.innerHTML = rooms.map((r, i) => {
+    const hasNum = r.current_number != null && r.current_number > 0;
+    const nowBox = hasNum
+      ? `<div class="now-box">
+           <span class="lbl">目前看到</span>
+           <span class="num-row"><span class="n">${r.current_number}</span><span class="u">號</span></span>
+         </div>`
+      : `<div class="now-box none"><span class="msg">尚未開始叫號</span></div>`;
+    return `<button class="card" onclick="pick(${i})">
+      <div class="name">${r.doctor_name || '（未顯示醫師）'}</div>
+      <div class="loc">${r.clinic_room || ''} · ${r.session || ''}</div>
+      ${nowBox}
+    </button>`;
+  }).join('');
+}
+
+function renderClosed(hasError) {
+  const el = document.getElementById('cards');
+  const title = hasError ? '連線異常' : '目前休診中';
+  const body  = hasError
+    ? '網路或醫院系統暫時無回應<br>已在幫您重試'
+    : `${setup.hospital_name || '此醫院'}<br>${deptDisplay}<br><br>診間尚未開始叫號<br>可能是尚未開診或剛結束`;
+  el.innerHTML = `
+    <div class="closed">
+      <div class="emo">⏳</div>
+      <div class="headline">${title}</div>
+      <div class="sub">${body}</div>
+      <div><span class="dot-anim"></span><span class="dot-anim"></span><span class="dot-anim"></span></div>
+      <div class="countdown" id="cd">每 30 秒自動重試，有資料會自動出現</div>
+      <div class="actions" style="margin-top:20px">
+        <button class="secondary" onclick="loadRooms()">🔄 立即重試</button>
+        <button class="secondary" onclick="skipToEnter()">我知道我的號碼，直接輸入</button>
+      </div>
+    </div>`;
+}
+
+function startPoll() {
+  if (pollTimer) return;
+  secondsLeft = 30;
+  pollTimer = setInterval(loadRooms, 30000);
+  countTimer = setInterval(() => {
+    secondsLeft = secondsLeft > 1 ? secondsLeft - 1 : 30;
+    const cd = document.getElementById('cd');
+    if (cd) cd.textContent = `下次自動更新：${secondsLeft} 秒後`;
+  }, 1000);
+}
+function stopPoll() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  if (countTimer) { clearInterval(countTimer); countTimer = null; }
+}
+
+function pick(i) {
+  const r = rooms[i];
+  stopPoll();
+  saveSetup({
+    doctor_name: r.doctor_name || '',
+    clinic_room: r.clinic_room || '',
+    session: r.session || '',
+    current_number: r.current_number,
+  });
+  go('/simple/enter');
+}
+
+function skipToEnter() {
+  stopPoll();
+  saveSetup({ doctor_name: '', clinic_room: '', session: '', current_number: null });
+  go('/simple/enter');
+}
+
+window.addEventListener('pagehide', stopPoll);
+</script>
+</body>
+</html>

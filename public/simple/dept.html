@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FAF6EE">
+<title>選科別</title>
+<link rel="stylesheet" href="/simple-static/simple.css?v=1776991770">
+</head>
+<body class="layout-fixed">
+
+<div class="top">
+  <header class="bar">
+    <button class="back" onclick="back()"><span class="arrow">‹</span><span class="label">返回</span></button>
+    <div class="brand" id="hospName">叮咚到號</div>
+  </header>
+  <div class="title" style="margin:6px 4px 0">您要看哪一科？</div>
+  <div class="step">第 2 步，共 4 步</div>
+</div>
+
+<div class="scroll">
+  <div class="cards two-col" id="cards"><div class="spinner-wrap"><div class="spinner"></div></div></div>
+</div>
+
+
+<script src="/simple-static/simple.js?v=1776991770"></script>
+<script>
+const setup = getSetup();
+if (!setup.hospital_code) go('/simple');
+document.getElementById('hospName').textContent = setup.hospital_name || '';
+
+let depts = [];
+
+(async function init() {
+  try {
+    const raw = await fetchDepartments(setup.hospital_code);
+    const pref = setup.branch_prefix || '';
+    if (pref) {
+      depts = raw.filter(d => {
+        const n = typeof d === 'string' ? d : (d.name || d.department || '');
+        return n.startsWith(pref);
+      }).map(d => {
+        const n = typeof d === 'string' ? d : (d.name || d.department || '');
+        return n.slice(pref.length).trim() || n;
+      });
+    } else {
+      depts = raw;
+    }
+    render();
+  } catch (e) {
+    document.getElementById('cards').innerHTML = `<div class="empty">無法取得科別資料<br>請返回重試</div>`;
+  }
+})();
+
+function render() {
+  const el = document.getElementById('cards');
+  if (!depts.length) { el.innerHTML = `<div class="empty">目前沒有科別資料</div>`; return; }
+  // 以「hospital_code:branch_prefix」當作 dept 計數的 scope key
+  const scope = setup.hospital_code + (setup.branch_prefix ? ':' + setup.branch_prefix : '');
+  const sorted = sortByPick(depts.map(d => typeof d === 'string' ? d : (d.name || d.department || '')),
+                            name => pickCount('dept', scope, name));
+  el.innerHTML = sorted.map(name => {
+    const n = pickCount('dept', scope, name);
+    const star = n >= 3 ? '⭐' : (n >= 1 ? '•' : '');
+    return `<button class="card" data-name="${name.replace(/"/g, '&quot;')}" onclick="pick(this.dataset.name)">
+      <div class="name">${name}${star ? ` <span style="color:var(--accent);font-size:18px">${star}</span>` : ''}</div>
+    </button>`;
+  }).join('');
+}
+
+function pick(name) {
+  const pref = setup.branch_prefix || '';
+  const fullDept = pref ? (pref + name) : name;
+  const scope = setup.hospital_code + (pref ? ':' + pref : '');
+  bumpPick('dept', scope, name);
+  saveSetup({ department: fullDept, department_display: name });
+  go('/simple/doctor');
+}
+</script>
+</body>
+</html>
