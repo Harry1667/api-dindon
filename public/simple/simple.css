@@ -130,6 +130,21 @@ header.bar { display: flex; align-items: center; height: 52px; margin-bottom: 8p
 }
 .card:active { background: #FAEDD8; border-color: var(--accent); }
 .card.selected { background: #FFF3E7; border-color: var(--accent); box-shadow: 0 4px 0 var(--accent-d); }
+.card.closed {
+  background: #F2ECD9;
+  border-color: var(--border);
+  opacity: 0.72;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.card.closed .name, .card.closed .branch, .card.closed .loc { color: #8A8F9E; }
+.closed-tag {
+  display: inline-block; margin-left: 8px;
+  background: #8A8F9E; color: #fff;
+  font-size: 12px; font-weight: 800; letter-spacing: 1px;
+  padding: 2px 8px; border-radius: 8px;
+  vertical-align: middle;
+}
 .card .name { font-size: 24px; font-weight: 700; }
 .card .loc  { font-size: 17px; color: var(--ink2); margin-top: 3px; }
 .card .meta { font-size: 16px; color: var(--ink-soft); margin-top: 4px; }
@@ -284,6 +299,26 @@ header.bar { display: flex; align-items: center; height: 52px; margin-bottom: 8p
 }
 .card.lt-card .lt-right.expired .lt-rem { color: #6A7286; }
 
+/* 追蹤數狀態列 */
+.tracks-status {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 2px 6px 12px; font-size: 14px; color: var(--ink2);
+}
+.tracks-status b { color: var(--ink); font-weight: 800; font-size: 16px; }
+.upgrade-chip {
+  background: var(--ink); color: #fff;
+  border: 0; border-radius: 999px;
+  padding: 6px 14px; font-size: 13px; font-weight: 700;
+  letter-spacing: 0.5px; cursor: pointer;
+}
+.upgrade-chip:active { background: var(--ink-soft); }
+.pro-tag {
+  display: inline-block; padding: 3px 10px;
+  background: linear-gradient(135deg, #FFD176, #FF9F40);
+  color: #5C2C05; font-weight: 800; font-size: 12px;
+  border-radius: 999px; letter-spacing: 1px;
+}
+
 /* 目前追蹤小綠點脈動 */
 .live-dot {
   display: inline-block; width: 10px; height: 10px; border-radius: 50%;
@@ -296,6 +331,52 @@ header.bar { display: flex; align-items: center; height: 52px; margin-bottom: 8p
   70% { box-shadow: 0 0 0 10px rgba(27, 94, 58, 0); }
   100% { box-shadow: 0 0 0 0 rgba(27, 94, 58, 0); }
 }
+
+/* 自訂彈框 */
+.dd-modal {
+  position: fixed; inset: 0; z-index: 9998;
+  background: rgba(26, 43, 74, 0.55);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  opacity: 0; transition: opacity .2s ease;
+  backdrop-filter: blur(2px);
+}
+.dd-modal.show { opacity: 1; }
+.dd-dlg {
+  background: #fff;
+  border-radius: 20px;
+  max-width: 420px; width: 100%;
+  padding: 22px 22px 16px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  transform: translateY(12px) scale(0.96);
+  transition: transform .22s cubic-bezier(.2,.7,.3,1);
+}
+.dd-modal.show .dd-dlg { transform: translateY(0) scale(1); }
+.dd-dlg-title {
+  font-size: 20px; font-weight: 800; color: var(--ink);
+  margin-bottom: 8px; letter-spacing: 0.3px;
+}
+.dd-dlg-msg {
+  font-size: 17px; color: var(--ink-soft); line-height: 1.6;
+  white-space: pre-line; word-break: break-word;
+}
+.dd-dlg-actions {
+  display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end;
+}
+.dd-dlg-btn {
+  font: inherit; cursor: pointer; border: 2px solid var(--border);
+  background: #fff; color: var(--ink);
+  min-width: 88px; height: 48px; padding: 0 18px;
+  border-radius: 14px; font-size: 17px; font-weight: 700;
+  transition: background .12s;
+}
+.dd-dlg-btn.dd-dlg-cancel { background: #fff; }
+.dd-dlg-btn.dd-dlg-cancel:active { background: var(--border2); }
+.dd-dlg-btn.dd-dlg-ok {
+  background: var(--accent); color: #fff; border-color: var(--accent);
+  box-shadow: 0 3px 0 var(--accent-d);
+}
+.dd-dlg-btn.dd-dlg-ok:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--accent-d); }
 
 /* Toast */
 .toast {

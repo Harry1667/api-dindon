@@ -29,41 +29,69 @@ const setup = getSetup();
 if (!setup.hospital_code) go('/simple');
 document.getElementById('hospName').textContent = setup.hospital_name || '';
 
-let depts = [];
+let depts = [];     // [{ display, full }]
+let activeDepts = new Set();  // 目前有診的科別（full name）
 
 (async function init() {
   try {
-    const raw = await fetchDepartments(setup.hospital_code);
     const pref = setup.branch_prefix || '';
+    const raw = await fetchDepartments(setup.hospital_code);
+    const rawList = raw.map(d => typeof d === 'string' ? d : (d.name || d.department || ''));
     if (pref) {
-      depts = raw.filter(d => {
-        const n = typeof d === 'string' ? d : (d.name || d.department || '');
-        return n.startsWith(pref);
-      }).map(d => {
-        const n = typeof d === 'string' ? d : (d.name || d.department || '');
-        return n.slice(pref.length).trim() || n;
-      });
+      depts = rawList
+        .filter(n => n.startsWith(pref))
+        .map(n => ({ full: n, display: n.slice(pref.length).trim() || n }));
     } else {
-      depts = raw;
+      depts = rawList.map(n => ({ full: n, display: n }));
     }
-    render();
+    await refreshActiveDepts();  // 第一次抓目前休診狀態並 render
   } catch (e) {
     document.getElementById('cards').innerHTML = `<div class="empty">無法取得科別資料<br>請返回重試</div>`;
   }
 })();
 
+async function refreshActiveDepts() {
+  try {
+    const progress = await fetchProgress(setup.hospital_code);
+    activeDepts = new Set();
+    progress.forEach(r => { if (r.department) activeDepts.add(r.department); });
+    render();
+  } catch {}
+}
+
+setInterval(refreshActiveDepts, 60000);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshActiveDepts();
+});
+
 function render() {
   const el = document.getElementById('cards');
   if (!depts.length) { el.innerHTML = `<div class="empty">目前沒有科別資料</div>`; return; }
-  // 以「hospital_code:branch_prefix」當作 dept 計數的 scope key
   const scope = setup.hospital_code + (setup.branch_prefix ? ':' + setup.branch_prefix : '');
-  const sorted = sortByPick(depts.map(d => typeof d === 'string' ? d : (d.name || d.department || '')),
-                            name => pickCount('dept', scope, name));
-  el.innerHTML = sorted.map(name => {
+  // 排序：開診優先，其次點擊次數
+  const sorted = depts
+    .map((d, idx) => {
+      const closed = activeDepts.size > 0 && !activeDepts.has(d.full);
+      const picks  = pickCount('dept', scope, d.display);
+      return { d, idx, closed, picks };
+    })
+    .sort((a, b) => {
+      if (a.closed !== b.closed) return a.closed ? 1 : -1;
+      if (a.picks  !== b.picks)  return b.picks - a.picks;
+      return a.idx - b.idx;
+    })
+    .map(x => x.d);
+
+  el.innerHTML = sorted.map(d => {
+    const name = d.display;
+    const closed = activeDepts.size > 0 && !activeDepts.has(d.full);
     const n = pickCount('dept', scope, name);
     const star = n >= 3 ? '⭐' : (n >= 1 ? '•' : '');
-    return `<button class="card" data-name="${name.replace(/"/g, '&quot;')}" onclick="pick(this.dataset.name)">
-      <div class="name">${name}${star ? ` <span style="color:var(--accent);font-size:18px">${star}</span>` : ''}</div>
+    const closedCls = closed ? ' closed' : '';
+    const onclick = closed ? '' : `onclick="pick(this.dataset.name)"`;
+    const closedBadge = closed ? `<span class="closed-tag">休診</span>` : '';
+    return `<button class="card${closedCls}" data-name="${name.replace(/"/g, '&quot;')}" ${onclick} ${closed ? 'disabled aria-disabled="true"' : ''}>
+      <div class="name">${name}${closedBadge}${star ? ` <span style="color:var(--accent);font-size:18px">${star}</span>` : ''}</div>
     </button>`;
   }).join('');
 }

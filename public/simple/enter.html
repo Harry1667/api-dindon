@@ -262,6 +262,20 @@ function refreshDisp() {
 }
 
 async function submit() {
+  // 檢查追蹤上限 — 達上限直接擋，不自動替換
+  pruneExpiredTracks();
+  const tracks = getTracks();
+  const limit  = getTrackLimit();
+  if (tracks.length >= limit) {
+    const tier = getTier();
+    const list = tracks.map(t => `· ${t.hospital_name} ${t.doctor_name || ''}`).join('\n');
+    const title = tier === 'free' ? '已達追蹤上限（免費版 1 個）' : `已達追蹤上限（${limit} 個）`;
+    const msg = `目前追蹤中：\n${list}\n\n請先停止現有追蹤，或等該診結束後再新增。`;
+    await ddAlert(msg, title);
+    go('/simple');
+    return;
+  }
+
   okBtn.disabled = true; okBtn.textContent = '…';
   try {
     const r = await startTrack({
@@ -273,7 +287,7 @@ async function submit() {
       user_number: parseInt(num),
     });
     if (!r.ok) throw new Error(r.error || 'start_failed');
-    L.set('dd_last_tracked', {
+    const newTrack = {
       hospital_code: setup.hospital_code,
       hospital_name: setup.hospital_name,
       department: setup.department,
@@ -284,9 +298,10 @@ async function submit() {
       user_number: parseInt(num),
       track_id: r.track_id,
       started_at: Date.now(),
-    });
+    };
+    addTrack(newTrack);
     S.set('simple_setup', { ...setup, user_number: parseInt(num), track_id: r.track_id });
-    go('/simple/tracking');
+    go('/simple/tracking?id=' + r.track_id);
   } catch (e) {
     toast('設定失敗，請稍後再試');
     okBtn.disabled = false;

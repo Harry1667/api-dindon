@@ -35,15 +35,17 @@
 <script src="/simple-static/simple.js?v=1776991770"></script>
 <script>
 let hospitals = [];
+let hospStatus = {};      // { code: { rooms, open } }
 let currentRegion = 'north';
 
 (async function init() {
-  renderLastTrack();
-  refreshLastTrackStatus();
+  renderTracksList();
+  refreshAllTracks();
 
   try {
-    const raw = await fetchHospitals();
+    const [raw, status] = await Promise.all([fetchHospitals(), fetchHospitalStatus()]);
     hospitals = expandHospitals(raw);
+    hospStatus = status;
     const counts = { north: 0, central: 0, south: 0 };
     hospitals.forEach(h => { const r = regionOf(h.code); if (counts[r] !== undefined) counts[r]++; });
     document.querySelectorAll('.tab').forEach(t => {
@@ -58,17 +60,33 @@ let currentRegion = 'north';
 
 function render() {
   let filtered = hospitals.filter(h => regionOf(h.code) === currentRegion);
-  // 按點擊次數排序（常點的靠前），次數相同維持原順序
-  filtered = sortByPick(filtered, h => pickCount('hospital', h.vid));
+  // 先按 open/closed 分組，再在同組內按點擊次數排序（穩定）
+  filtered = filtered
+    .map((h, idx) => {
+      const closed = !!(hospStatus[h.code] && !hospStatus[h.code].open);
+      const picks  = pickCount('hospital', h.vid);
+      return { h, idx, closed, picks };
+    })
+    .sort((a, b) => {
+      if (a.closed !== b.closed) return a.closed ? 1 : -1;  // open 先
+      if (a.picks  !== b.picks)  return b.picks - a.picks;   // 多點先
+      return a.idx - b.idx;
+    })
+    .map(x => x.h);
   document.getElementById('regionLbl').textContent = `${REGION_LABELS[currentRegion]} · 共 ${filtered.length} 家醫院`;
   const el = document.getElementById('cards');
   if (!filtered.length) { el.innerHTML = `<div class="empty">此地區暫無醫院</div>`; return; }
   el.innerHTML = filtered.map(h => {
     const n = pickCount('hospital', h.vid);
     const star = n >= 3 ? '⭐' : (n >= 1 ? '•' : '');
+    const st = hospStatus[h.code];
+    const closed = st && !st.open;  // 有狀態且全休才標記；無狀態時維持可點
+    const closedCls = closed ? ' closed' : '';
+    const onclick = closed ? '' : `onclick="pick('${h.vid}')"`;
+    const closedBadge = closed ? `<span class="closed-tag">休診中</span>` : '';
     return `
-    <button class="card" data-vid="${h.vid}" onclick="pick('${h.vid}')">
-      <div class="name">${h.name}${h.branch ? `<div class="branch">${h.branch}</div>` : ''}</div>
+    <button class="card${closedCls}" data-vid="${h.vid}" ${onclick} ${closed ? 'disabled aria-disabled="true"' : ''}>
+      <div class="name">${h.name}${h.branch ? `<div class="branch">${h.branch}</div>` : ''}${closedBadge}</div>
       <div class="loc">${h.loc || ''}${star ? ` <span style="color:var(--accent);font-weight:800;margin-left:4px">${star}</span>` : ''}</div>
     </button>`;
   }).join('');
@@ -96,73 +114,68 @@ document.getElementById('tabs').addEventListener('click', (e) => {
   document.querySelector('.scroll').scrollTop = 0;
 });
 
-function jumpLast() {
-  const last = L.get('dd_last_tracked', null);
-  if (!last) return;
-  const active = isTrackingActive(last);
-  if (active) {
-    // 還在追蹤中 → 直接到追蹤頁
-    go('/simple/tracking');
-  } else {
-    // 已過期 → 帶資料重新設定
-    saveSetup({
-      hospital_code: last.hospital_code,
-      hospital_name: last.hospital_name,
-      department: last.department,
-      department_display: last.department_display,
-      doctor_name: last.doctor_name,
-      clinic_room: last.clinic_room,
-      session: last.session,
-    });
-    go('/simple/enter');
-  }
+function jumpTrack(trackId) {
+  go('/simple/tracking?id=' + trackId);
 }
 
-/* 判斷追蹤是否還在進行中
-   - 有 started_at 且 < 4 小時（backend 每 30 分自動取消 >4 小時 web/test 任務）
-*/
-function isTrackingActive(last) {
-  if (!last || !last.started_at) return false;
-  const ageMs = Date.now() - last.started_at;
-  return ageMs < 4 * 60 * 60 * 1000;
+function isTrackingActive(t) {
+  if (!t || !t.started_at) return false;
+  return (Date.now() - t.started_at) < 4 * 60 * 60 * 1000;
 }
 
-function renderLastTrack(live) {
-  const last = L.get('dd_last_tracked', null);
+/* 渲染追蹤清單：每個追蹤一張雙欄卡（左資料 / 右狀態 chip）*/
+function renderTracksList(liveMap) {
+  pruneExpiredTracks();
+  const tracks = getTracks();
   const w = document.getElementById('lastTrackWrap');
-  if (!last || !last.hospital_name) { w.innerHTML = ''; return; }
-  const active = isTrackingActive(last);
+  if (!tracks.length) { w.innerHTML = ''; return; }
+
+  const limit = getTrackLimit();
+  const tier  = getTier();
+
+  let cardsHtml = tracks.map(t => cardHtml(t, liveMap && liveMap[t.track_id])).join('');
+
+  // 限額狀態列
+  const atLimit = tracks.length >= limit;
+  const statusBar = `
+    <div class="tracks-status">
+      <span>追蹤中 <b>${tracks.length}/${limit}</b></span>
+      ${tier === 'free'
+        ? `<button class="upgrade-chip" onclick="upgradePrompt()">升級 Pro 追 3 個</button>`
+        : `<span class="pro-tag">Pro</span>`}
+    </div>`;
+
+  w.innerHTML = cardsHtml + statusBar;
+}
+
+function cardHtml(t, live) {
+  const active = isTrackingActive(t);
   const label  = active ? '⟳ 目前追蹤' : '上次追蹤';
   const color  = active ? '#1B5E3A' : '#8A8F9E';
   const bg     = active ? '#F0F7F3' : '#FFFFFF';
   const border = active ? '#1B5E3A' : '#E3DCC9';
   const pulse  = active ? '<span class="live-dot"></span>' : '';
 
-  // 右側重點：依狀態變色 + 顯示「您的號碼」+ 狀態文字
   let rightHtml;
   if (active && live) {
     let stateClass = '';
     let remText = '';
-    if (live.passed) {
-      stateClass = 'passed'; remText = '已過號';
-    } else if (live.rem === 0) {
-      stateClass = 'yours'; remText = '輪到您';
-    } else {
-      remText = `還差 ${live.rem} 號`;
-    }
+    if (live.passed) { stateClass = 'passed'; remText = '已過號'; }
+    else if (live.rem === 0) { stateClass = 'yours'; remText = '輪到您'; }
+    else { remText = `還差 ${live.rem} 號`; }
     rightHtml = `
       <div class="lt-right ${stateClass}">
         <div class="lt-lbl">目前看到</div>
         <div class="lt-n">${live.cur}</div>
         <div class="lt-u">號</div>
-        <div class="lt-mine">您是 <b>${last.user_number}</b> 號</div>
+        <div class="lt-mine">您是 <b>${t.user_number}</b> 號</div>
         <div class="lt-rem">${remText}</div>
       </div>`;
   } else if (active) {
     rightHtml = `
       <div class="lt-right loading">
         <div class="lt-lbl">您的號碼</div>
-        <div class="lt-n">${last.user_number}</div>
+        <div class="lt-n">${t.user_number}</div>
         <div class="lt-u">號</div>
         <div class="lt-rem">追蹤中…</div>
       </div>`;
@@ -170,46 +183,93 @@ function renderLastTrack(live) {
     rightHtml = `
       <div class="lt-right expired">
         <div class="lt-lbl">您的號碼</div>
-        <div class="lt-n">${last.user_number}</div>
+        <div class="lt-n">${t.user_number}</div>
         <div class="lt-u">號</div>
         <div class="lt-rem">點擊再追蹤</div>
       </div>`;
   }
 
-  w.innerHTML = `
-    <button class="card lt-card" style="border-color:${border};background:${bg};margin-bottom:16px"
-            onclick="jumpLast()">
+  return `
+    <button class="card lt-card" style="border-color:${border};background:${bg};margin-bottom:10px"
+            onclick="jumpTrack(${t.track_id})">
       <div class="lt-left">
         <div class="meta" style="color:${color};font-weight:700;display:flex;align-items:center;gap:6px">
           ${pulse}<span>${label}</span>
         </div>
-        <div class="name">${last.hospital_name}</div>
-        <div class="loc">${last.department_display || last.department || ''} · ${last.doctor_name || ''}${last.clinic_room ? ' · ' + last.clinic_room : ''}</div>
+        <div class="name">${t.hospital_name}</div>
+        <div class="loc">${t.department_display || t.department || ''} · ${t.doctor_name || ''}${t.clinic_room ? ' · ' + t.clinic_room : ''}</div>
       </div>
       ${rightHtml}
     </button>`;
 }
 
-/* 針對「目前追蹤」抓即時進度（與 /tracking 同一比對邏輯）*/
-async function refreshLastTrackStatus() {
-  const last = L.get('dd_last_tracked', null);
-  if (!last || !isTrackingActive(last)) return;
+/* 抓每個追蹤的即時進度 */
+let _lastLive = {};  // track_id → cur
+let _firstLoad = true;
+async function refreshAllTracks() {
+  const tracks = pruneExpiredTracks();
+  if (!tracks.length) return;
+  const byHosp = {};
+  tracks.forEach(t => { if (isTrackingActive(t)) (byHosp[t.hospital_code] ||= []).push(t); });
+
+  const liveMap = {};
+  await Promise.all(Object.entries(byHosp).map(async ([code, ts]) => {
+    try {
+      const list = await fetchProgress(code);
+      ts.forEach(t => {
+        const m = findMatchingRoom(list, t);
+        if (!m) return;
+        const cur = m.current_number || 0;
+        const my = t.user_number;
+        liveMap[t.track_id] = { cur, rem: Math.max(0, my - cur), passed: cur > my, my };
+      });
+    } catch {}
+  }));
+
+  // 音效：
+  //   - 警戒區（rem<=3 或到號/過號）任何變動 → dingdong
+  //   - 遠程變動 → ding（單響）
+  //   - 首次載入就在警戒區 → dingdong 補播
+  let anyAlert = false, anyFar = false, anyAlertOnLoad = false;
+  for (const [tid, live] of Object.entries(liveMap)) {
+    const prev = _lastLive[tid];
+    const inAlert = live.cur >= live.my;
+    const inNear  = live.rem > 0 && live.rem <= 3;
+    const notable = inAlert || inNear;
+    if (prev === undefined) {
+      if (_firstLoad && notable) anyAlertOnLoad = true;
+    } else if (prev !== live.cur) {
+      if (notable) anyAlert = true;
+      else         anyFar   = true;
+    }
+    _lastLive[tid] = live.cur;
+  }
+  if (anyAlert || anyAlertOnLoad) playDingDong();
+  else if (anyFar) playDing();
+  _firstLoad = false;
+
+  renderTracksList(liveMap);
+}
+
+async function upgradePrompt() {
+  const ok = await ddConfirm(
+    'Pro 可同時追蹤 3 家醫院/醫生。\n\n（暫為測試模式，按「確定」直接升級；未來版會接金流。）',
+    '升級 Pro'
+  );
+  if (ok) { setTier('paid'); location.reload(); }
+}
+
+async function refreshHospStatus() {
   try {
-    const list = await fetchProgress(last.hospital_code);
-    const match = findMatchingRoom(list, last);
-    if (!match) return;
-    const cur = match.current_number || 0;
-    const my = last.user_number;
-    const rem = Math.max(0, my - cur);
-    const passed = cur > my;   // 已過號
-    renderLastTrack({ cur, rem, passed });
+    hospStatus = await fetchHospitalStatus();
+    render();
   } catch {}
 }
 
-/* 每 30 秒自動更新 + 回到頁面時立即更新（跟 /tracking 同步）*/
-setInterval(refreshLastTrackStatus, 30000);
+setInterval(refreshAllTracks, 30000);
+setInterval(refreshHospStatus, 60000);
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) refreshLastTrackStatus();
+  if (!document.hidden) { refreshAllTracks(); refreshHospStatus(); }
 });
 </script>
 </body>
