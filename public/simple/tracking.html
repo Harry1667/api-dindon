@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#FAF6EE">
 <title>叮咚到號 · 追蹤中</title>
+<link rel="stylesheet" href="/simple-static/simple.css?v=1776991770">
 <style>
   /* === Design tokens（對齊 /simple）================================= */
   :root {
@@ -150,13 +151,17 @@
   .stat .sub { font-size: 12px; color: var(--ink3); margin-top: 4px; min-height: 16px; }
 
   /* === Section card =================================================== */
+  /* 覆寫 simple.css 的 .card（那個有 width:100% 會搭 margin 溢出）*/
   .card {
+    width: auto; min-height: 0;
     background: var(--card);
     border: 2px solid var(--border2);
     border-radius: var(--r-md);
     margin: 0 16px 14px;
     padding: 18px 18px 16px;
     box-shadow: var(--shadow-soft);
+    display: block;           /* 蓋掉 simple.css 的 flex */
+    cursor: default;
   }
   .card h2 {
     margin: 0 0 14px; font-size: 17px; font-weight: 800;
@@ -452,7 +457,18 @@
 
 <script src="/simple-static/simple.js?v=1776991770"></script>
 <script>
-const last = L.get('dd_last_tracked', null);
+// 支援 ?id=<track_id> 顯示單一追蹤；無 id 則顯示最新
+pruneExpiredTracks();
+const qs = new URLSearchParams(location.search);
+const qid = qs.get('id');
+let last;
+if (qid) {
+  last = findTrack(qid);
+} else {
+  const tracks = getTracks();
+  last = tracks.length ? tracks[tracks.length - 1] : null;
+  if (last) location.replace('/simple/tracking?id=' + last.track_id);
+}
 if (!last) go('/simple');
 
 document.getElementById('hname').textContent = last.hospital_name || '';
@@ -529,6 +545,12 @@ function showPending() {
   document.getElementById('pendingView').style.display = '';
 }
 
+let _prevCur = null;
+let _hadMatch = false;
+let _noMatchCount = 0;
+let _passedAt = null;   // 首次偵測到 cur > my 的時間
+let _pollTimer = null;
+
 async function refresh(manual) {
   try {
     const list = await fetchProgress(last.hospital_code);
@@ -536,27 +558,60 @@ async function refresh(manual) {
 
     document.getElementById('updTime').textContent = nowHHMM();
 
-    if (!match) { showPending(); return; }
+    if (!match) {
+      _noMatchCount++;
+      // 曾有匹配，現在連續 3 次抓不到 → 診已結束
+      if (_hadMatch && _noMatchCount >= 3) {
+        await autoEnd('doctor_gone', '這位醫生的看診資料已消失，診別可能已結束。');
+        return;
+      }
+      showPending();
+      return;
+    }
+    _hadMatch = true;
+    _noMatchCount = 0;
+
+    // 音效：到號/快到/過號都 dingdong；一般變動 ding；首次載入若已在警戒區補播一次
+    const newCur = match.current_number || 0;
+    const my  = last.user_number;
+    const rem = my - newCur;
+    const inAlert = newCur >= my;                 // 到號或過號
+    const inNear  = rem > 0 && rem <= 3;          // 快到（3 人內）
+    if (_prevCur === null) {
+      if (inAlert || inNear) playDingDong();      // 頁面一載入就在警戒區（快到/到號/過號）→ 補播
+    } else if (_prevCur !== newCur) {
+      if (inAlert || inNear) playDingDong();      // 警戒區內任何變動都叮咚
+      else playDing();                            // 還遠，單響
+    }
+    _prevCur = newCur;
 
     showMain();
-    const cur = match.current_number || 0;
-    const my  = last.user_number;
+    const cur = newCur;
     const ahead = Math.max(0, my - cur);
 
     document.getElementById('curNum').textContent = cur || '—';
     document.getElementById('ahead').textContent  = ahead;
     document.getElementById('aheadUnit').textContent = '人';
     document.getElementById('cardMine').classList.remove('passed');
+    if (cur <= my) _passedAt = null;  // 沒過號就 reset 過號計時
 
     if (cur === 0) {
       setStage('waiting');
       setCta('wait', '尚未開始叫號', '醫師還沒開始看診，請稍候', ICON.clock);
       document.getElementById('eta').textContent = '醫師尚未開始看診';
     } else if (my < cur) {
+      // 首次偵測過號 → 紀錄時間；持續過號 > 5 分鐘 → 自動結束追蹤
+      if (_passedAt === null) _passedAt = Date.now();
+      const passedFor = Date.now() - _passedAt;
+      if (passedFor > 5 * 60 * 1000) {
+        await autoEnd('passed', '您已過號，追蹤已自動結束。');
+        return;
+      }
       setStage('passed');
       document.getElementById('cardMine').classList.add('passed');
       document.getElementById('ahead').textContent = 0;
-      setCta('pass', '您已過號', '請儘速前往診間，告知護理站您已到', ICON.warn);
+      const mins = Math.ceil((5 * 60 * 1000 - passedFor) / 60000);
+      setCta('pass', '您已過號', `請儘速前往診間（${mins} 分鐘後自動結束）`, ICON.warn);
       document.getElementById('eta').textContent = `目前已看到第 ${cur} 號`;
     } else if (ahead === 0) {
       setStage('yours');
@@ -576,8 +631,28 @@ async function refresh(manual) {
   }
 }
 
+async function autoEnd(reason, message) {
+  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+  try {
+    if (last.track_id) {
+      await fetch(`/api/track/${last.track_id}/stop`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guest_id: getGuestId(), reason })
+      });
+    }
+  } catch {}
+  if (last.track_id) removeTrack(last.track_id);
+  playDingDong();
+  await ddAlert(message + '\n\n追蹤已自動停止。', '看診結束');
+  go('/simple');
+}
+
 async function stopTrack() {
-  if (!confirm('確定停止追蹤？')) return;
+  const ok = await ddConfirm(
+    `${last.hospital_name || ''} · ${last.doctor_name || ''}\n您的號碼 ${last.user_number}\n\n確定要停止這筆追蹤嗎？`,
+    '停止追蹤'
+  );
+  if (!ok) return;
   try {
     if (last.track_id) {
       await fetch(`/api/track/${last.track_id}/stop`, {
@@ -586,13 +661,13 @@ async function stopTrack() {
       });
     }
   } catch {}
-  localStorage.removeItem('dd_last_tracked');
+  if (last.track_id) removeTrack(last.track_id);
   go('/simple');
 }
 
 refresh(false);
-const timer = setInterval(() => refresh(false), 30000);
-window.addEventListener('pagehide', () => clearInterval(timer));
+_pollTimer = setInterval(() => refresh(false), 30000);
+window.addEventListener('pagehide', () => { if (_pollTimer) clearInterval(_pollTimer); });
 </script>
 </body>
 </html>
