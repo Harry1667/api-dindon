@@ -282,7 +282,9 @@ async def _scrape_one(sem, code, adapter, db_session_factory, cache):
 
                 logger.info(f"[scrape] {adapter.hospital_name} 完成，{len(progress_list)} 個診間")
             else:
-                logger.debug(f"[scrape] {adapter.hospital_name} 目前沒有看診中的診間")
+                # 爬蟲回傳空 → 該家醫院所有診已結束，主動清除 Redis
+                await cache.clear_hospital(code)
+                logger.debug(f"[scrape] {adapter.hospital_name} 目前沒有看診中的診間，已清快取")
 
         except Exception as e:
             logger.error(f"[scrape] {adapter.hospital_name} 抓取失敗: {e}")

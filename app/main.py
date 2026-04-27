@@ -274,6 +274,30 @@ async def get_progress(request: Request, hospital_code: str):
     }
 
 
+@app.get("/api/hospitals/status")
+async def get_all_hospitals_status(request: Request):
+    """回傳所有已註冊醫院的目前狀態（只回房間數量，不回詳細資料）。
+    給 /simple 首頁判斷哪些醫院目前休診用。
+    """
+    from app.scrapers.registry import AdapterRegistry
+    cache = request.app.state.cache
+    redis = cache.redis
+    codes = AdapterRegistry.get_all_codes()
+    results = {}
+    try:
+        # 一次 pipeline 取所有 index:* 集合大小
+        pipe = redis.pipeline()
+        for code in codes:
+            pipe.scard(f"index:{code}")
+        sizes = await pipe.execute()
+        for code, n in zip(codes, sizes):
+            results[code] = {"rooms": int(n or 0), "open": int(n or 0) > 0}
+    except Exception:
+        for code in codes:
+            results[code] = {"rooms": 0, "open": False}
+    return {"count": len(results), "hospitals": results}
+
+
 @app.get("/api/admin/live-progress/{hospital_code}")
 async def get_live_progress(hospital_code: str):
     """即時查詢某醫院看診進度（直接呼叫 Adapter，僅 admin 使用）"""

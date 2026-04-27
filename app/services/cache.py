@@ -32,38 +32,103 @@ class CacheService:
             retry_on_timeout=True,
         )
 
+    @staticmethod
+    def _session_matches_now(session: str) -> bool:
+        """判斷該 session 標籤是否屬於當前時段（避免寫入已結束時段的舊資料）
+
+        時段寬鬆定義（允許延診 2-3 小時）：
+          - 上午診：06:00 ~ 14:00
+          - 下午診：12:00 ~ 22:30（允許延診到晚診結束）
+          - 夜診  ：16:00 ~ 24:00 + 00:00 ~ 01:00
+        其他無法辨識的 session 標籤一律允許（保守）。
+        """
+        from datetime import datetime, timezone, timedelta
+        TW_TZ = timezone(timedelta(hours=8))
+        now = datetime.now(TW_TZ)
+        minutes = now.hour * 60 + now.minute
+
+        s = (session or '').strip()
+        if not s:
+            return True
+
+        def in_window(lo_h, lo_m, hi_h, hi_m):
+            lo = lo_h * 60 + lo_m
+            hi = hi_h * 60 + hi_m
+            return lo <= minutes < hi
+
+        if '上午' in s or 'morning' in s.lower():
+            return in_window(6, 0, 14, 0)
+        if '下午' in s or 'afternoon' in s.lower():
+            return in_window(12, 0, 22, 30)
+        if '夜' in s or '晚' in s or 'evening' in s.lower() or 'night' in s.lower():
+            # 夜診跨午夜也允許（00:00-01:00）
+            return in_window(16, 0, 24, 0) or in_window(0, 0, 1, 0)
+        return True  # 未知標籤 → 放行
+
     async def store_progress(self, progress_list: list[ClinicProgressData]):
-        """將爬蟲結果存入 Redis 快取"""
+        """將爬蟲結果存入 Redis 快取（依當前時段過濾 + 索引集同步修剪）"""
+        # 先過濾：只留「當前時段」的進度
+        if progress_list:
+            progress_list = [p for p in progress_list if self._session_matches_now(p.session)]
+
+        # 取得 hospital_code：優先用 progress_list[0]，若為空則從 caller 推不出來 → 由另一個入口 store_progress_for 處理
         if not progress_list:
             return
 
         hospital_code = progress_list[0].hospital_code
+        await self._replace_progress(hospital_code, progress_list)
+
+    async def _replace_progress(self, hospital_code: str, progress_list: list[ClinicProgressData]):
+        """完整替換某醫院的進度資料：寫入新 keys，並從 index 移除不在本次結果的舊成員"""
         try:
+            PROGRESS_TTL = 600  # 10 分鐘（個別資料 TTL）
+            index_key = f"index:{hospital_code}"
+            new_keys = set(p.to_cache_key() for p in progress_list)
+
+            # 先讀現有 index 成員，計算要移除的 stale keys
+            old_members = await self.redis.smembers(index_key)
+            stale = [m for m in old_members if m not in new_keys]
+
             pipe = self.redis.pipeline()
 
-            # 不清除舊資料，只更新有抓到的診間（MERGE 邏輯）
-            # 這樣即使某次爬蟲漏抓某些科別，之前的資料不會消失
-            # 每筆資料有 10 分鐘 TTL，超時自然過期
-            PROGRESS_TTL = 600  # 10 分鐘（2 次爬蟲週期的緩衝）
-
-            # 寫入新資料（覆蓋或新增）
+            # 寫入新資料
             for p in progress_list:
                 key = p.to_cache_key()
                 pipe.set(key, json.dumps(p.to_dict(), ensure_ascii=False), ex=PROGRESS_TTL)
 
-            # 更新醫院索引：加入新的 key，不刪除舊的（靠 TTL 自然淘汰）
-            index_key = f"index:{hospital_code}"
-            room_keys = [p.to_cache_key() for p in progress_list]
-            if room_keys:
-                pipe.sadd(index_key, *room_keys)
+            # 同步修剪 index：移除不在本輪結果的舊 key，加入新 key
+            if stale:
+                pipe.srem(index_key, *stale)
+                # 順手刪掉對應資料 key（即使 TTL 還沒到）
+                pipe.delete(*stale)
+            if new_keys:
+                pipe.sadd(index_key, *new_keys)
                 pipe.expire(index_key, PROGRESS_TTL)
 
             await pipe.execute()
-            logger.info(f"[cache] 已更新 {hospital_code} 共 {len(progress_list)} 筆")
+            logger.info(
+                f"[cache] 已更新 {hospital_code} 共 {len(progress_list)} 筆"
+                + (f"（移除 {len(stale)} 筆舊資料）" if stale else "")
+            )
         except RedisError as e:
             logger.error(f"[cache] Redis 寫入失敗 {hospital_code}: {e}")
         except Exception as e:
             logger.error(f"[cache] 儲存失敗 {hospital_code}: {e}")
+
+    async def clear_hospital(self, hospital_code: str):
+        """完全清除一家醫院的 Redis 快取（當 scraper 回傳空列表時呼叫）"""
+        try:
+            index_key = f"index:{hospital_code}"
+            members = await self.redis.smembers(index_key)
+            pipe = self.redis.pipeline()
+            if members:
+                pipe.delete(*members)
+            pipe.delete(index_key)
+            await pipe.execute()
+            if members:
+                logger.info(f"[cache] 已清空 {hospital_code}（{len(members)} 筆）")
+        except Exception as e:
+            logger.error(f"[cache] 清空失敗 {hospital_code}: {e}")
 
     async def get_all_progress(self, hospital_code: str) -> list[ClinicProgressData]:
         """取得某醫院所有診間的即時進度（用 mget 批量取，2 次 round trip）"""
