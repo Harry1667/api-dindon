@@ -9,3 +9,4 @@ logs/
 redis_data/
 celerybeat-schedule*
 .gstack/
+.claude/
