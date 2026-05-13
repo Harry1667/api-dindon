@@ -74,7 +74,11 @@ class NotifierService:
                             f"醫師已無看診資料，追蹤自動結束\n\n"
                             f"如需再次追蹤，輸入醫院名稱查詢"
                         )
-                        await self._send_and_finish(task, line_user_id, message, "doctor_gone")
+                        await self._send_and_finish(
+                            task, line_user_id, message, "doctor_gone",
+                            apns_title="診已結束",
+                            apns_body=f"{task.doctor_name or '醫師'} 今日看診已結束",
+                        )
                         continue
 
                 # --- 預約追蹤超時 ---
@@ -136,7 +140,11 @@ class NotifierService:
                     f"醫師可能已結束看診或系統更新中\n\n"
                     f"輸入 t 查看追蹤 ｜ 輸入 c 取消追蹤"
                 )
-                await self._send_and_finish(task, line_user_id, message, "doctor_gone")
+                await self._send_and_finish(
+                    task, line_user_id, message, "doctor_gone",
+                    apns_title="診已結束",
+                    apns_body=f"{task.doctor_name or '醫師'} 今日看診已結束",
+                )
             return
 
         progress = results[0]
@@ -162,7 +170,11 @@ class NotifierService:
                 f"請儘速前往診間報到，告知護理站您已到\n"
                 f"（大多數醫院可重新安排看診順序）"
             )
-            await self._send(task, line_user_id, message, remaining)
+            await self._send(
+                task, line_user_id, message, remaining,
+                apns_title="號碼已過",
+                apns_body=f"#{user_num} 號已過，{progress.doctor_name or '醫師'}",
+            )
             return
 
         # 情境 B：號碼已過（目前看診號 > 用戶號碼）
@@ -188,7 +200,11 @@ class NotifierService:
                 f"輸入 c 取消追蹤（30 分鐘後自動停止）"
             )
             # 記錄 remaining=0 表示已通知過號，但不結束追蹤
-            await self._send(task, line_user_id, message, remaining=0)
+            await self._send(
+                task, line_user_id, message, remaining=0,
+                apns_title="號碼已過",
+                apns_body=f"#{user_num} 號已過，{progress.doctor_name or '醫師'}",
+            )
             return
 
         # ========== 到號情境 ==========
@@ -202,7 +218,11 @@ class NotifierService:
                 f"⚡ 請儘速前往診間報到！\n"
                 f"祝看診順利 🙏"
             )
-            await self._send_and_finish(task, line_user_id, message, "arrived")
+            await self._send_and_finish(
+                task, line_user_id, message, "arrived",
+                apns_title="輪到您了 🔔",
+                apns_body=f"#{user_num} 號，{progress.doctor_name or '醫師'} 請準備",
+            )
             return
 
         # ========== 1-push 提醒（差 N 號時通知）==========
@@ -226,7 +246,11 @@ class NotifierService:
             f"💡 輸入 t 查看最新進度"
         )
 
-        await self._send(task, line_user_id, message, remaining)
+        await self._send(
+            task, line_user_id, message, remaining,
+            apns_title="叮咚到號",
+            apns_body=f"快到了！差 {remaining} 號，{progress.doctor_name or '醫師'}",
+        )
 
     def _should_notify(self, threshold: int, remaining: int, last_remaining: int | None) -> bool:
         """1-push 模式：只在 remaining 首次 <= threshold 時通知一次
@@ -273,7 +297,7 @@ class NotifierService:
             logger.warning(f"[notifier] notify_log 寫入失敗（非關鍵）: {e}")
 
     async def _push_web(self, task, line_user_id: str | None, title: str, body: str):
-        """對 task 對應的訂閱發 Web Push（LINE 用戶和 web guest 都試，失敗不拋）"""
+        """對 task 對應的訂閱發 Web Push（LINE 用戶和 web guest 都試,失敗不拋)"""
         try:
             from app.api.push import send_push_to_line_user, send_push_to_guest
             payload = {"title": title, "body": body, "url": "/chat", "tag": f"dindon-{task.id}"}
@@ -285,7 +309,29 @@ class NotifierService:
         except Exception as e:
             logger.warning(f"[notifier] web push 失敗（非關鍵）task={task.id}: {e}")
 
-    async def _send(self, task, line_user_id: str, message: str, remaining: int):
+    async def _push_apns(self, task, title: str, body: str):
+        """若 task 帶 apns_token,推 APNs(iOS App)。失敗不拋。"""
+        token = getattr(task, "apns_token", None)
+        if not token:
+            return
+        try:
+            from app.services.apns import send_apns, clear_invalid_token
+            await send_apns(
+                device_token=token,
+                title=title,
+                body=body,
+                data={"task_id": task.id},
+                on_invalid_token=clear_invalid_token,
+            )
+            try:
+                await self.cache.redis.incr("monitor:apns_notify_count")
+            except Exception:
+                pass
+        except Exception as e:
+            logger.warning(f"[notifier] APNs 推送失敗(非關鍵)task={task.id}: {e}")
+
+    async def _send(self, task, line_user_id: str, message: str, remaining: int,
+                    apns_title: str | None = None, apns_body: str | None = None):
         """發送通知，更新剩餘數，但不結束追蹤
 
         原子性保證：先推播成功，才更新 DB。推播失敗時不更新狀態，
@@ -296,6 +342,8 @@ class NotifierService:
         title = "叮咚到號" if "🔔" in message[:10] else "看診進度更新"
         body = message.split("\n", 1)[-1][:100] if "\n" in message else message[:100]
         await self._push_web(task, line_user_id, title, body)
+        # APNs（iOS App）推送 — 失敗不影響後續
+        await self._push_apns(task, apns_title or title, apns_body or body)
 
         if line_user_id:
             try:
@@ -323,7 +371,8 @@ class NotifierService:
             f"[notifier] 已通知 source={getattr(task,'source','?')} task={task.id} remaining={remaining}"
         )
 
-    async def _send_and_finish(self, task, line_user_id: str, message: str, end_reason: str = "arrived"):
+    async def _send_and_finish(self, task, line_user_id: str, message: str, end_reason: str = "arrived",
+                               apns_title: str | None = None, apns_body: str | None = None):
         """發送通知、標記完成、建立回饋記錄、詢問用戶
 
         原子性保證：先推播成功，才標記完成。推播失敗時不改 DB，
@@ -334,6 +383,8 @@ class NotifierService:
         title = "🔔 輪到您了！" if end_reason == "arrived" else "叮咚追蹤結束"
         body = message.split("\n", 1)[-1][:100] if "\n" in message else message[:100]
         await self._push_web(task, line_user_id, title, body)
+        # APNs（iOS App）推送 — 失敗不影響後續
+        await self._push_apns(task, apns_title or title, apns_body or body)
 
         # Step 1: 有 LINE userId 才推播，否則直接標記完成
         if line_user_id:

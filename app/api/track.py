@@ -18,6 +18,7 @@ async def track_start(request: Request):
     clinic_room = body.get("clinic_room")
     session = body.get("session")
     user_number = body.get("user_number", 0)
+    apns_token = body.get("apns_token") or None  # iOS App 帶來的 device token（選填）
 
     if not guest_id or not hospital_code or not department:
         return JSONResponse({"ok": False, "error": "缺少必填欄位"}, status_code=400)
@@ -38,6 +39,7 @@ async def track_start(request: Request):
             session=session,
             user_number=user_number,
             status=TaskStatus.ACTIVE,
+            apns_token=apns_token,
             created_at=datetime.utcnow(),
         )
         db.add(task)

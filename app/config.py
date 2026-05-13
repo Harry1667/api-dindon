@@ -97,6 +97,23 @@ class Settings:
         default_factory=lambda: os.getenv("VAPID_SUBJECT", "mailto:admin@dl-app.com")
     )
 
+    # APNs (iOS Push) — Token-based auth with .p8 key
+    apns_key_id: str = field(
+        default_factory=lambda: os.getenv("APNS_KEY_ID", "")
+    )
+    apns_team_id: str = field(
+        default_factory=lambda: os.getenv("APNS_TEAM_ID", "")
+    )
+    apns_bundle_id: str = field(
+        default_factory=lambda: os.getenv("APNS_BUNDLE_ID", "")
+    )
+    apns_private_key: str = field(
+        default_factory=lambda: os.getenv("APNS_PRIVATE_KEY", "")
+    )
+    apns_use_sandbox: bool = field(
+        default_factory=lambda: os.getenv("APNS_USE_SANDBOX", "false").lower() == "true"
+    )
+
     def __post_init__(self):
         # JWT secret 未設定時自動產生（每次重啟會變，正式環境務必設定）
         if not self.jwt_secret_key:

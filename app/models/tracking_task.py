@@ -49,5 +49,8 @@ class TrackingTask(Base):
     status: Mapped[TaskStatus] = mapped_column(
         SQLEnum(TaskStatus), default=TaskStatus.ACTIVE, comment="任務狀態"
     )
+    apns_token: Mapped[str | None] = mapped_column(
+        String(200), nullable=True, default=None, comment="iOS APNs device token（選填）"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     notified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="通知時間")
