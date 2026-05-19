@@ -145,13 +145,20 @@ class NtuhAdapter(BaseHospitalAdapter):
             active_times = ["2", "3"]
 
         all_results = []
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        # 顯式 cookie jar + follow_redirects 確保 session 跨 request 保留。
+        # ntuh 後端對沒 cookie 的 POST DeptLightTable 會回 500。
+        async with httpx.AsyncClient(
+            timeout=15.0,
+            cookies=httpx.Cookies(),
+            follow_redirects=True,
+        ) as client:
             # 訪問主頁面取得 session cookie + CSRF token
             token = await self._get_csrf_token(client)
             if not token:
                 logger.warning(f"[{self.hospital_code}] 無法取得 CSRF token")
                 return []
 
+            empty_streak = 0
             for time_code in active_times:
                 for dept in self.depts:
                     try:
@@ -159,6 +166,15 @@ class NtuhAdapter(BaseHospitalAdapter):
                             client, dept, time_code, now, token
                         )
                         all_results.extend(results)
+                        # token 若失效會集中爆 500：累積 8 個連續空回 + 0 成果就 refresh
+                        if not results and not all_results:
+                            empty_streak += 1
+                            if empty_streak == 8:
+                                new_token = await self._get_csrf_token(client)
+                                if new_token:
+                                    token = new_token
+                        else:
+                            empty_streak = 0
                     except Exception as e:
                         logger.warning(
                             f"[{self.hospital_code}] dept={dept} "

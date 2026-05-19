@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 
 import httpx
 
-from app.scrapers.base import BaseHospitalAdapter
+from app.scrapers.base import BaseHospitalAdapter, proxy_state_tag
 from app.schemas.clinic import ClinicProgressData
 from app.config import settings
 
@@ -64,6 +64,11 @@ class ShinkongAdapter(BaseHospitalAdapter):
                 except Exception as e:
                     logger.warning(f"[{self.hospital_code}] {name}({code}) 失敗: {e}")
 
+        if not all_results:
+            logger.warning(
+                f"[{self.hospital_code}] 0 筆資料 ({proxy_state_tag()}) — "
+                f"若 proxy=OFF 但本機可 curl 通，需檢查 production SOCKS5 設定"
+            )
         logger.info(f"[{self.hospital_code}] 共取得 {len(all_results)} 個診間")
         return all_results
 
@@ -78,7 +83,7 @@ class ShinkongAdapter(BaseHospitalAdapter):
                 resp.raise_for_status()
                 data = resp.json()
         except Exception as e:
-            logger.error(f"[{self.hospital_code}] 取科別列表失敗: {e}")
+            logger.error(f"[{self.hospital_code}] 取科別列表失敗 ({proxy_state_tag()}): {e}")
             return []
 
         if not isinstance(data, list):

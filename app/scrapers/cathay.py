@@ -16,7 +16,7 @@ from datetime import datetime, timezone, timedelta
 import httpx
 from bs4 import BeautifulSoup
 
-from app.scrapers.base import BaseHospitalAdapter
+from app.scrapers.base import BaseHospitalAdapter, proxy_state_tag
 from app.schemas.clinic import ClinicProgressData
 from app.config import settings
 
@@ -86,6 +86,11 @@ class CathayAdapter(BaseHospitalAdapter):
                         if isinstance(result, ClinicProgressData):
                             all_results.append(result)
 
+        if not all_results:
+            logger.warning(
+                f"[{self.hospital_code}] 0 筆資料 ({proxy_state_tag()}) — "
+                f"若 proxy=OFF 但本機可 curl 通，需檢查 production SOCKS5 設定"
+            )
         logger.info(f"[{self.hospital_code}] 取得 {len(all_results)} 個診間")
         return all_results
 
@@ -99,7 +104,7 @@ class CathayAdapter(BaseHospitalAdapter):
             resp = await client.get(CATHAY_URL)
             resp.raise_for_status()
         except Exception as e:
-            logger.error(f"[{self.hospital_code}] 取首頁失敗: {e}")
+            logger.error(f"[{self.hospital_code}] 取首頁失敗 ({proxy_state_tag()}): {e}")
             return {}
 
         room_map: dict[str, list[str]] = {}

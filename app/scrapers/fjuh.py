@@ -70,7 +70,17 @@ class FjuhAdapter(BaseHospitalAdapter):
 
     async def _fetch_sections(self, client, headers) -> list[tuple[str, str]]:
         try:
-            resp = await client.post(f"{BASE_URL}/Team/QueryList", data={}, headers=headers)
+            # IIS 對 application/x-www-form-urlencoded + 無 body 會回 411。
+            # 顯式帶 content=b"" + Content-Length: 0 避開。
+            resp = await client.post(
+                f"{BASE_URL}/Team/QueryList",
+                content=b"",
+                headers={
+                    **headers,
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Content-Length": "0",
+                },
+            )
             resp.raise_for_status()
             data = resp.json()
             sections = []
@@ -89,7 +99,11 @@ class FjuhAdapter(BaseHospitalAdapter):
         resp = await client.post(
             self.base_url,
             data={"GroupID": "", "SectionID": sect_code, "strOPDTIMEFLAG": session_code},
-            headers={**headers, "Referer": self.base_url},
+            headers={
+                **headers,
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Referer": self.base_url,
+            },
         )
         resp.raise_for_status()
         return self._parse_html(resp.text, sect_name, session_code, now)
