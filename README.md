@@ -22,3 +22,30 @@ docker compose up -d
 
 ## 相關
 iOS App：[DingDong](https://github.com/Harry1667/DingDong)
+
+---
+
+## English
+
+Backend for DingDong (叮咚到號) — FastAPI + Celery, with custom scrapers for 29 Taiwanese hospitals. Powers a LINE bot, a LIFF mini-app, and a `/simple` view designed for elderly users.
+
+- **Production**: https://dd.dl-app.com
+- 29 hospitals; Tri-Service General Hospital is split into 3 campuses → 31 cards total
+- Scrapers intentionally sleep 22:00–07:00, Sundays, and Taiwan public holidays
+
+### Tech stack
+- **API**: FastAPI + Uvicorn
+- **Task queue**: Celery + Redis
+- **Database**: MySQL
+- **Scrapers**: one custom scraper per hospital under `app/scrapers/`
+- **Frontend**: LINE bot + LIFF + `/simple` static page for elderly users
+- **Deployment**: Docker Compose + Nginx (aaPanel)
+
+### Quick start
+```bash
+cp .env.example .env
+docker compose up -d
+```
+
+### Related
+iOS app: [DingDong](https://github.com/Harry1667/DingDong)
